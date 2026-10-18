@@ -59,6 +59,165 @@ Anomalib is a deep learning library that aims to collect state-of-the-art anomal
 - The majority of models can be exported to [**OpenVINO**](https://www.intel.com/content/www/us/en/developer/tools/openvino-toolkit/overview.html) Intermediate Representation (IR) for accelerated inference on Intel hardware.
 - A set of [inference tools](tools) for quick and easy deployment of the standard or custom anomaly detection models.
 
+## RDT Reliability Monitor: local workstation reference
+
+The standalone Windows camera/inspection UI is in [application/rdt_monitor](application/rdt_monitor).
+See its [operator and development guide](application/rdt_monitor/README.md) for the full workflow.
+The paths below describe this workstation, whose repository is **`D:\anomalib`**.
+Generated IDs and operator-selected directories vary between collections and runs.
+This is an **unqualified development inspection system**, not a production defect-detection guarantee.
+
+### What is included in Git
+
+This repository uses a **source/configuration-only** policy for the RDT workstation.
+Commit the desktop source and styles, `pyproject.toml`, `uv.lock`, `hatch_build.py`,
+tests and test fixtures, documentation, and `tools/keyence_nr_cm01_api.py`.
+The camera helper is required to build/install the desktop package.
+
+The root `.gitignore` deliberately excludes local `models`, `recipes`,
+`inspection-results`, and the old root `coil-01-recipe.json`. Training `datasets`,
+Python environments, caches and build outputs are also excluded. The paths and
+recipe names documented below describe local files; **cloning the repository does
+not download these assets**. No Git LFS configuration is needed for these excluded models.
+
+On another workstation, install dependencies using the commands below and download the
+backbone to its documented location if training offline. Either collect/review/train a
+new specimen and save its inspection recipe, or separately copy a trusted recipe JSON
+**together with its matching detector directory** into `recipes`. Back up local recipes,
+model bundles and evidence separately; pushing Git does not back them up.
+
+### Start the UI
+
+Run from PowerShell:
+
+```powershell
+Set-Location D:\anomalib
+uv sync --project application\rdt_monitor --group dev --extra inference
+uv run --project application\rdt_monitor rdt-monitor
+```
+
+The first command after changing directory prepares the UI environment, including OpenVINO.
+For later launches, only the `uv run` command is needed.
+
+| Component | Local path / name |
+| --- | --- |
+| Desktop project | `D:\anomalib\application\rdt_monitor` |
+| UI entry point | `D:\anomalib\application\rdt_monitor\src\rdt_monitor\app.py` (`rdt-monitor`) |
+| Desktop Python environment | `D:\anomalib\application\rdt_monitor\.venv\Scripts\python.exe` |
+| Training Python environment | `D:\anomalib\.venv\Scripts\python.exe` |
+| Training implementation | `D:\anomalib\application\rdt_monitor\src\rdt_monitor\training.py` |
+| Camera integration source | `D:\anomalib\tools\keyence_nr_cm01_api.py` |
+
+The two Python environments serve different purposes: the lightweight desktop runs the UI
+and OpenVINO inference; the training interpreter needs Anomalib, Torch and export dependencies.
+The collection dialog's **Training Python** field selects the latter. Generic camera index `0`
+was used for the local USB camera; an OpenCV index does not verify camera identity.
+
+### Model and pretrained backbone
+
+| Setting | Value |
+| --- | --- |
+| Anomaly-detection algorithm | **PatchCore** (Python class `anomalib.models.Patchcore`) |
+| Pretrained feature-extractor backbone | **Wide ResNet-50-2**, timm name `wide_resnet50_2.racm_in1k` |
+| Official weights repository | [timm/wide_resnet50_2.racm_in1k](https://huggingface.co/timm/wide_resnet50_2.racm_in1k) |
+| Direct backbone download | [model.safetensors](https://huggingface.co/timm/wide_resnet50_2.racm_in1k/resolve/main/model.safetensors) |
+| Local backbone file | `D:\anomalib\models\backbones\wide_resnet50_2.racm_in1k\model.safetensors` |
+| Trained inference format | OpenVINO IR: matching `model.xml` **and** `model.bin` |
+| Training / inference device | CPU |
+| Exported model input | One RGB image, NCHW `1 x 3 x 256 x 256`; ONNX opset 18 export |
+
+The backbone is a reusable pretrained feature extractor, **not a generative model or a
+universal ready-to-use defect detector**. PatchCore is fitted on reviewed normal ROI crops
+for the specimen, camera and pose. Training prefers the local backbone file above and
+does not download weights when it is present and valid. Missing local weights permit
+the normal HTTPS/cache loading; invalid local weights fail explicitly. Restart training
+after placing a downloaded file. Live inference uses the recipe's trained XML/BIN bundle,
+not this backbone file directly.
+
+### Recipes: load from one folder
+
+All recipe Load/Save dialogs start in **[recipes](recipes)** (`D:\anomalib\recipes`).
+Load a JSON file with **Load recipe**, connect the camera, then **Start** and confirm
+the synchronization setup. Loading alone does not start a run.
+
+| Existing recipe | Model bundle beside the JSON | Purpose |
+| --- | --- | --- |
+| `D:\anomalib\recipes\coil-01-inspection.json` | `detector-ec81403161564bd8b3db18c7734f3c3f\model.xml` and `model.bin` | Model-bound `coil-01` inspection |
+| `D:\anomalib\recipes\inspection-recipe.json` | `detector-8862bfe3965d4c70907c7fc155b3d849\model.xml` and `model.bin` | Separate saved `coil-01` inspection binding; different ROI/BIN identity |
+| `D:\anomalib\recipes\coil-01-counting.json` | None | Synchronization/cycle counting only; no defect detector |
+
+Keep each recipe JSON and its sibling `detector-<id>` directory together when copying or
+moving them. Do not mix XML/BIN files from different bundles. Recipes record specimen ID,
+source dimensions, marker/timing settings and, for inspection, model paths/SHA-256 hashes,
+inspection ROI and threshold. New schema-4 recipes also store the review margin.
+The existing schema-3 inspection recipes above use a backward-compatible margin of `0.05`.
+Both currently specify `640 x 480` source images and threshold `0.50`; verify pose and ROI
+against the actual specimen rather than choosing a recipe by filename alone.
+
+Default verdicts are green below `0.45`, yellow from `0.45` through `0.55` inclusive, and
+red above `0.55`. Grey means no valid completed inspection/evidence. Scores are normalized
+anomaly scores, not defect probabilities. Only red model verdicts latch the separate alarm.
+Training completion does not activate a model: explicitly **Save inspection recipe**, then load it.
+
+### Collections and training outputs
+
+The default collection parent is `D:\anomalib\datasets\rdt-candidates` when launched from
+the repository root. The output folder is editable. Each collection creates a
+`collection-<id>` folder containing `collection.json`, `source-0001.png`,
+`crop-0001.png`, and subsequent numbered source/ROI pairs. Review all 20-30 candidates
+and explicitly confirm the specimen remained undamaged before choosing **Train PatchCore**.
+
+Existing local collection:
+
+```text
+D:\anomalib\datasets\rdt-candidates\Coil\collection-dca5197549e54d4cbe5a07463c9658ff
+```
+
+Existing successful training job under that collection:
+
+```text
+training-e69ca3ade5e542fd87499b4c6bdc4c2b\
+  dataset.json                 Confirmed collection snapshot and identity
+  good\                        Exact normal ROI crops used for fitting
+  fit\                         Anomalib/Lightning fitting and checkpoint outputs
+  weights\openvino\model.xml    Exported detector structure
+  weights\openvino\model.bin    Matching detector weights
+```
+
+Its original saved recipe is in the same `weights\openvino` directory as
+`inspection-recipe.json`; use the centralized recipe copies above for everyday loading.
+Training also writes `result-<id>.json` in the collection directory.
+To reuse an export after restarting, choose **Inspection > Collect and train > Load collection**,
+then **Load trained model** in Training and select that job's `weights\openvino\model.xml`.
+
+### Per-cycle results and visible ROI
+
+**Open inspection results** opens **[inspection-results](inspection-results)**
+(`D:\anomalib\inspection-results`). New runs use:
+
+```text
+D:\anomalib\inspection-results\
+  run-<id>\
+    green-normal\cycle-00000001\
+    yellow-review\cycle-00000002\
+    red-defect\cycle-00000003\
+    grey-uninspected\cycle-00000004\
+```
+
+Each successful cycle directory contains `source.png` (exact inspected frame),
+`roi.png` (inspection crop), `map.png` (normalized anomaly map), and `result.json`
+(run/cycle/frame/time, recipe/model identity, hashes, score, threshold/margin, verdict
+and errors). Failed cycles may have only available images or metadata; check the
+record's missing-image/error fields. Counting-only runs do not generate inspection evidence.
+The development budget is 512 MiB per run with no automatic deletion; unavailable storage
+is reported explicitly. Older `recipes\live-runs` output is left untouched.
+
+The live camera outlines **Inspection ROI** in cyan. The bottom-right panel shows the
+latest exact-cycle ROI with a red anomaly heatmap; stronger red marks model-suspected
+anomalies, not confirmed physical damage. It updates after each cycle result, stays visible
+between cycles and after Stop, and resets on a new run or recipe. The **Event log** is always
+visible at the bottom; **Details** separately reveals technical status.
+
 # 📦 Installation
 
 Anomalib can be installed from PyPI. We recommend using a virtual environment and a modern package installer like `uv` or `pip`.

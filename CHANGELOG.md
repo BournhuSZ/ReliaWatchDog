@@ -8,13 +8,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- RDT shows the latest exact-cycle inspection ROI with an anomaly heatmap below monitoring controls, refreshes it after each cycle result and outlines the recipe inspection ROI on the live camera preview.
+- RDT latest-cycle green/normal, yellow/review, red/defect and grey/uninspected indicators, with a separate latched red alarm; recipe-bound review margins default to 0.05. New results are grouped under inspection-results by run, verdict and zero-padded cycle, with per-cycle images, metadata and explicit failure records when storage permits.
+- RDT model-bound inspection recipes bundle trained OpenVINO weights, model hashes, training ROI and threshold. Explicit Start enables unqualified exact-cycle inference with bounded queues, local per-cycle evidence, latched defects and asynchronous Stop finalization.
+- RDT candidate collection now offers Auto marker-cycle capture or Manual operator-declared capture, with one explicit Capture cycle click per fresh frame; both preserve review and explicit training gates.
+- RDT run-lifecycle foundation separates observed, inspected, and uninspected cycles, gates inspection on explicit readiness, and models bounded finalization and coverage recovery. Counting-only tools are explicitly under Diagnostics; production Start remains unavailable until its required station services exist.
+- RDT candidate collection saves 20-30 exact completed-cycle source/ROI pairs, supports persistent review and requires explicit undamaged confirmation plus a manual Train action. PatchCore fitting/export runs in a separate process with integrity checks and never changes the live model automatically.
+- Standalone RDT offline defect-inspection window for trusted Anomalib OpenVINO/ONNX exports, independent specimen ROI, background image import/inference, unqualified scores and source-aligned heatmaps. Manual PNG snapshots are not qualified evidence; live monitoring remains disabled.
+- RDT synchronization recipes can be saved to and loaded from JSON with specimen ID, marker regions, recognition/timing settings, and source dimensions; loaded settings require confirmation before starting a run.
+- Standalone RDT monitor camera/synchronization workflow with graphical marker regions, specimen identity, and replay diagnostics. Defect inspection remains gated pending qualification, inference, authentication, and durable evidence.
+
 ### Removed
 
 ### Changed
 
+- RDT always shows the event log at the bottom of the monitoring screen; Details toggles technical information separately without hiding the log.
+- RDT adopts the supplied industrial monitor reference with a framed camera, circular latest-inspection verdict, separate latched alarm and right-side run controls; camera connection/freshness remains distinct from inspection and technical details stay collapsed.
+- RDT defaults to a simplified operator view; technical status and the session log are available under Details, collection/training stays in the Inspection menu, and actionable faults and uninspected-cycle warnings remain visible without opening diagnostics.
+- RDT operator UI prioritizes the latest verdict and separate latched alarm, groups camera/run actions, exposes Collect and train and Open inspection results on the main screen, and improves keyboard focus, shared semantic styling, review-band feedback and compact-window layouts.
 ### Deprecated
 
 ### Fixed
+
+- RDT recipe Load/Save dialogs now default to a single repository-level recipes directory instead of training output folders or unspecified locations.
+- RDT recipe loading now distinguishes counting-only and model-bound recipes, retains selected recipe identity across camera connection/start, exposes marker/model/ROI details, rejects missing bundled models, and no longer falsely logs detector unavailability while live inference is pending.
+- RDT training exports a fixed batch-one OpenVINO detector using ONNX opset 18, avoiding batch-two input rejection and unsupported opset-14 downgrades.
+- RDT PatchCore training keeps checkpointing enabled to match Anomalib's automatically installed ModelCheckpoint callback, avoiding a Lightning trainer initialization failure.
+- RDT training prefers a locally downloaded wide_resnet50_2.racm_in1k backbone when present, avoiding Hugging Face requests and failing explicitly on invalid local weights.
+- RDT Load recipe now opens before camera connection or specimen entry, reports invalid files visibly, and selects settings without starting a run; Start separately validates them against the camera frame.
+- RDT main screen now exposes working Load recipe, Start, and Stop controls beside camera connection controls instead of hiding run commands in Diagnostics behind disabled placeholders.
+- RDT development Stop now bars new observations and drains accepted cycle events without blocking on an in-flight capture callback; disconnect finalizes the run before requesting camera release.
+- RDT counts a bending cycle only after both Start and Position marks are initially visible, disappear, and return. Start-only motion and incomplete startup no longer count. Brief uncertainty pauses counting, unresolved transitions time out, and appearance matching tolerates bounded within-region pose changes.
+- RDT idle startup no longer reports an overdue cycle before observed motion. Once both marks are established, a debounced departure starts the first-return deadline; completed cycles reset the active-run deadline.
+- RDT camera setup now captures separate Start/Position mark appearances instead of treating thin colored marks as bright-area occupancy. Appearance references persist in backward-compatible recipes, and the UI exposes match values and precise rearming state. Physical moving-cycle acceptance remains pending.
+- RDT synchronization loss no longer stops a healthy camera preview or reports a camera failure; recovery requires an explicitly confirmed new synchronization run.
 
 ## [v2.7.0] - 2026-10-06
 

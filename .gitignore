@@ -6,6 +6,12 @@ results
 openvino_cache
 logs/
 
+# RDT workstation assets (source/configuration-only remote)
+/models/
+/recipes/
+/inspection-results/
+/coil-01-recipe.json
+
 # Test-related files and directories
 tmp*
 
