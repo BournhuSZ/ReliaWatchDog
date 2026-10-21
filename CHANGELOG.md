@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- RDT camera setup now has Basic and Advanced tabs, named family recipes, specimen name/batch metadata, model-preserving marker adjustments, and frozen per-run setup snapshots. New reusable recipe revisions preserve previous files and share existing detector bundles.
 - RDT shows the latest exact-cycle inspection ROI with an anomaly heatmap below monitoring controls, refreshes it after each cycle result and outlines the recipe inspection ROI on the live camera preview.
 - RDT latest-cycle green/normal, yellow/review, red/defect and grey/uninspected indicators, with a separate latched red alarm; recipe-bound review margins default to 0.05. New results are grouped under inspection-results by run, verdict and zero-padded cycle, with per-cycle images, metadata and explicit failure records when storage permits.
 - RDT model-bound inspection recipes bundle trained OpenVINO weights, model hashes, training ROI and threshold. Explicit Start enables unqualified exact-cycle inference with bounded queues, local per-cycle evidence, latched defects and asynchronous Stop finalization.
@@ -20,8 +21,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Removed
 
+- RDT recipe-editing and training-export authorization prompts and Windows setup-admin account requirements. Advanced settings and recipe saves are available without credentials; validation, explicit confirmation, and revision protection remain unchanged.
+
 ### Changed
 
+- RDT recipe loading preserves the current specimen serial instead of restoring the training specimen's serial. Station-wide authorization and production qualification remain pending.
 - RDT always shows the event log at the bottom of the monitoring screen; Details toggles technical information separately without hiding the log.
 - RDT adopts the supplied industrial monitor reference with a framed camera, circular latest-inspection verdict, separate latched alarm and right-side run controls; camera connection/freshness remains distinct from inspection and technical details stay collapsed.
 - RDT defaults to a simplified operator view; technical status and the session log are available under Details, collection/training stays in the Inspection menu, and actionable faults and uninspected-cycle warnings remain visible without opening diagnostics.

@@ -50,6 +50,7 @@ class LiveInspection:
         capacity (int): Queued frames, excluding the one in inference.
         budget_bytes (int): Per-run evidence ceiling; exhaustion fails visibly.
         output_root (Path | None): Explicit results root; defaults to the recipe directory.
+        setup_path (Path | None): Frozen run setup recorded before camera admission.
     """
 
     def __init__(
@@ -61,10 +62,13 @@ class LiveInspection:
         capacity: int = 4,
         budget_bytes: int = 512 * 1024 * 1024,
         output_root: Path | None = None,
+        setup_path: Path | None = None,
     ) -> None:
         if not 1 <= capacity <= 32 or budget_bytes < 1:
             raise ValueError("Live inspection requires bounded positive capacity and evidence budget")
         self.binding, self.recipe_path, self.folder = binding, recipe_path, folder
+        self.setup_path = setup_path
+        self._setup_digest = file_digest(setup_path) if setup_path is not None else None
         self._loader = loader
         self._jobs: Queue[tuple[Image, SyncResult]] = Queue(maxsize=capacity)
         self._failures: Queue[tuple[SyncResult, str]] = Queue(maxsize=128)
@@ -172,6 +176,8 @@ class LiveInspection:
             "received_at": event.timestamp,
             "recorded_utc": datetime.now(UTC).isoformat(),
             "recipe": str(self.recipe_path),
+            "run_setup": str(self.setup_path) if self.setup_path is not None else None,
+            "run_setup_sha256": self._setup_digest,
             "model_file": self.binding.model_file,
             "model_sha256": self.binding.model_sha256,
             "weights_sha256": self.binding.weights_sha256,

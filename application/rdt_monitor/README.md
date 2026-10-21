@@ -7,6 +7,61 @@ Studio are unchanged. Offline and cycle-bound live exported-model inspection are
 available for unqualified development. Production operation remains gated pending
 qualification, authentication, verified hardware binding, retention, and recovery.
 
+The [rollout plan](../../TechRequirement/Rollout%20Plan.md) records the deployment
+sequence: vision-marker synchronization for the Phase 1 supervised pilot, followed
+by read-only IPC/controller feedback integration in Phase 2. Controller-triggered
+inspection is planned, not currently implemented.
+
+## Simple Recipe And Specimen Setup
+
+Camera setup now opens with **Basic** and **Advanced** tabs. These are UI pages,
+not two configuration files that operators must manage.
+
+- **Basic**: load a recipe, identify the actual specimen by serial number, optionally
+  enter its name/batch, check the frozen camera image and cyan inspection ROI, and
+  adjust Start/Position marker regions if needed. **Use current marker appearance**
+  recaptures both references from the frozen frame; it does not relocate the
+  inspection crop. Confirm the setup and test-cycle check, then choose **Use for this run**.
+  Confirmation is an operator declaration, not an automated test or qualification.
+- **Advanced**: open directly without a username or password, name the
+  recipe by purpose (for example, "A-type standard bending"), add purpose notes,
+  and configure recognition, timing, or detector decision settings. The inspection
+  ROI remains the trained crop; changing the model/crop requires the separate
+  collection/training workflow and validation. **Save recipe** writes a new revision
+  to a new filename; it never overwrites an existing recipe.
+- Loading a recipe no longer replaces the current specimen serial with the serial
+  of its training specimen. Enter the actual serial before Start; it can also be
+  corrected on Basic. Start still opens setup and requires confirmation.
+- A named schema-5 recipe contains a stable family identity, unique revision, friendly
+  name and notes, one detector binding (or counting-only mode), and default specimen
+  setup. Schemas 1-4 remain readable. Display names and serial numbers are metadata,
+  not filesystem paths. Existing recipes are not automatically rewritten.
+- Marker-only changes for A-002 reuse the exact A-family detector/ROI/thresholds.
+  They do not modify A-001's reusable recipe. Technical changes to a loaded recipe require
+  saving a new revision before use. A changed mark does not prove that the
+  specimen pose or inspected surface is compatible with the model.
+- Before accepting camera cycles, every run records a complete
+  `run-<id>-setup.json` under `inspection-results`, including specimen details,
+  marker references, detector/family identities, setup identity, and source-recipe
+  hash. Storage failure blocks starting. Inspection evidence references this snapshot
+  and its hash. These files preserve the run configuration, not reboot recovery.
+- New revisions of an already bound recipe must be saved beside the original recipe
+  so they can reference the same detector bundle without copying/retraining it.
+  Keep all referencing JSON files and the bundle together when moving or backing them up.
+
+### Recipe Editing Access
+
+Recipe editing and saving do not require application login, Windows account
+authorization, or a setup-admin group. Advanced settings are immediately editable;
+training's **Save inspection recipe** also works without a credential prompt.
+There is no application admin username or password.
+
+Anyone able to use the desktop application can change and save recipes. Recipe
+validation, explicit run confirmation, new-filename revision protection, model
+integrity checks, and frozen run snapshots remain in place. Deploy only trusted
+recipe/model files and protect workstation access. Station-wide authorization,
+tamper-resistant storage, and production approval remain separate qualification work.
+
 ## Run
 
 Recipes are kept in the repository's `recipes` folder (`D:\anomalib\recipes`
@@ -31,7 +86,7 @@ this is **not** a qualified production inspection implementation.
 - **Load recipe**, **Start**, and **Stop** are directly on the main screen,
   beside the camera connection controls. **Load recipe** opens the JSON picker
   without requiring a camera connection or a pre-entered specimen ID. It selects
-  settings and restores the stored specimen ID without starting a run.
+  settings without replacing the actual specimen ID or starting a run.
   **Start** opens synchronization setup against the connected camera; source
   dimensions and supported settings are checked before confirmation starts counting.
   These are working development controls, not production defect inspection.
@@ -82,7 +137,7 @@ this is **not** a qualified production inspection implementation.
   enabled against an unverified OpenCV index.
 
 Remaining increments: station-level durable records/retention, Windows-authenticated
-Admin configuration, reusable approved recipes and validation, and verified
+station-wide Admin configuration, reusable approved recipes and validation, and verified
 automatic recovery/endurance testing. A reboot
 does not yet restore an interrupted run. No approval, durable evidence, or 24/7
 coverage guarantee is implied by this increment.
@@ -179,25 +234,26 @@ values show a current error, which clears when the values are corrected.
 
 In the development synchronization setup dialog:
 
-1. Draw both regions and review settings, then click **Save recipe**. Select a
+1. Draw both regions and review settings. To create a reusable recipe, open
+  **Advanced**, enter a purpose-based name, and click **Save recipe**. Select a new
   JSON filename and location. Saving keeps setup open and does not start a run.
 2. To reuse settings, click **Load recipe** and select the saved JSON file.
-  The dialog restores its specimen ID, both regions, recognition mode/references, brightness thresholds,
-  debounce, and timing limits. The associated specimen ID is shown above the controls.
+  The dialog restores both regions, recognition mode/references, brightness thresholds,
+  debounce, and timing limits, but preserves the actual specimen serial.
 3. Check placement against the current frozen camera image, confirm the regions
-  and timing, then click **Start synchronization**. The run uses the loaded
-  specimen ID. Cancelling setup leaves the current run and main-screen ID unchanged.
+  and inspection surface, exercise test cycles, then choose **Use for this run**.
+  Cancelling setup leaves the current run and main-screen ID unchanged.
 
 Recipes persist across application restarts at the selected file location. They
 include a schema version and source image dimensions; mismatched dimensions,
 invalid files, and unsupported settings are rejected without changing setup.
-Writes atomically replace the selected file, so a failed replacement preserves
-the previous recipe. Filenames are selected explicitly, not derived from specimen IDs.
+Reusable recipe saves use new filenames and atomic writes, preserving previous
+revisions. Filenames are selected explicitly, not derived from specimen IDs.
 Appearance recipes contain two small grayscale reference patches, not full camera
 images, inspection evidence, authentication, or qualification approval. Older
-brightness-only recipes load explicitly in legacy mode. To migrate one, select
-**Mark appearance** while both marks are visible, review the boxes, and
-save the recipe again. Matching image
+brightness-only recipes load explicitly in legacy mode. To migrate one, open
+Advanced and select **Mark appearance** while both marks are visible, review the boxes,
+and save a new recipe revision. Matching image
 dimensions alone does not establish camera identity or correct physical placement.
 
 Startup remains **Waiting for fresh marker transition** without a cycle deadline
@@ -336,8 +392,9 @@ normal/defect validation. No online learning or automatic model replacement occu
 3. Stop any active run. On the main screen, **Load recipe** selects this new JSON
    without starting work. Connect the camera, verify the specimen ID and pose, then
    **Start**. Confirm the marker setup and choose **Start unqualified inspection**.
-   Editing a model-bound synchronization setup is rejected; create a new recipe
-   rather than silently changing the active binding. Legacy recipes still count only.
+   Basic marker-only adjustments are saved with the run while retaining the model
+   binding; technical changes to a loaded recipe require saving a new recipe revision in Advanced.
+   Legacy recipes without a detector still count only.
    The main screen and setup show **Unqualified inspection** for a model-bound recipe,
    or **Counting only - no detector** for a synchronization-only recipe. The selected
    filename/mode remains visible after connecting and starting. Hover the recipe

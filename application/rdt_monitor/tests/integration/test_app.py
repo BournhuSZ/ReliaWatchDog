@@ -555,7 +555,8 @@ def application():
 
 
 @pytest.fixture
-def window(application):
+def window(application, monkeypatch, tmp_path):
+    monkeypatch.setattr(desktop, "INSPECTION_DIRECTORY", tmp_path / "inspection-results")
     instance = desktop.MainWindow()
     instance.specimen.setText("PCB-TEST-001")
     yield instance
@@ -1350,6 +1351,7 @@ def region_dialog(window, application):
     image = QImage(640, 480, QImage.Format.Format_RGB888)
     image.fill(QColor("#505861"))
     dialog = desktop.ReplaySettings(window.recipe, window, camera_image=image, specimen_id="PCB-SAVED-001")
+    dialog.recipe_name.setText("PCB standard bending")
     dialog.recognition_mode.setCurrentIndex(1)
     dialog.show()
     application.processEvents()
@@ -1379,6 +1381,7 @@ def test_actual_mark_setup_captures_and_restores_references(window, application,
     source = cv2.imread(str(Path(__file__).parents[1] / "fixtures" / "pink-marks-reference.png"))
     image = QImage(source.data, 200, 185, source.strides[0], QImage.Format.Format_BGR888).copy()
     dialog = desktop.ReplaySettings(window.recipe, window, camera_image=image, specimen_id="coil-01")
+    dialog.recipe_name.setText("Coil standard bending")
     assert dialog.recognition_mode.currentIndex() == 0
     for inputs, values in zip(
         dialog._regions,
@@ -1400,7 +1403,7 @@ def test_actual_mark_setup_captures_and_restores_references(window, application,
     restored = desktop.ReplaySettings(window.recipe, window, camera_image=absent, specimen_id="other")
     monkeypatch.setattr(desktop.QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
     restored.load_recipe_button.click()
-    assert restored.specimen_id == "coil-01"
+    assert restored.specimen_id == "other"
     assert restored.recognition_mode.currentIndex() == 0
     assert restored._candidate_recipe(require_confirmation=False) == candidate
     assert not restored._confirmed.isChecked()
@@ -1408,6 +1411,7 @@ def test_actual_mark_setup_captures_and_restores_references(window, application,
     dialog._confirmed.setChecked(True)
     dialog.resize(*size)
     dialog.show()
+    dialog.setup_tabs.setCurrentIndex(1)
     application.processEvents()
     assert dialog.store_recipe_button.isVisible() and dialog.save_button.isEnabled()
     assert dialog.rect().contains(dialog._error.geometry())
@@ -1427,15 +1431,18 @@ def test_recipe_save_and_load_in_fresh_setup(region_dialog, window, monkeypatch,
     path = tmp_path / "PCB-recipe.json"
     monkeypatch.setattr(desktop.QFileDialog, "getSaveFileName", lambda *args: (str(path), ""))
     dialog.store_recipe_button.click()
-    assert load_recipe(path) == StoredRecipe("PCB-SAVED-001", expected, 640, 480)
+    saved = load_recipe(path)
+    assert saved.specimen_id == "PCB-SAVED-001"
+    assert saved.recipe == expected
+    assert saved.profile.name == "PCB standard bending"
     assert "Recipe saved:" in dialog.recipe_file.text()
     assert dialog.result() != QDialog.DialogCode.Accepted
     assert window.camera is None and window.run_record is None
     fresh = desktop.ReplaySettings(window.recipe, window, camera_image=dialog.preview._image, specimen_id="OTHER")
     monkeypatch.setattr(desktop.QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
     fresh.load_recipe_button.click()
-    assert fresh.specimen_id == "PCB-SAVED-001"
-    assert "PCB-SAVED-001" in fresh.recipe_identity.text()
+    assert fresh.specimen_id == "OTHER"
+    assert "OTHER" in fresh.recipe_identity.text()
     assert fresh._candidate_recipe(require_confirmation=False) == expected
     assert fresh.preview.regions == (expected.marker, expected.position)
     assert not fresh._confirmed.isChecked()
@@ -1489,10 +1496,10 @@ def test_recipe_save_error_is_visible_and_does_not_close_setup(region_dialog, mo
     draw_region_pair(dialog)
     monkeypatch.setattr(desktop.QFileDialog, "getSaveFileName", lambda *args: (str(tmp_path / "recipe.json"), ""))
 
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise OSError("Disk unavailable")
 
-    monkeypatch.setattr(desktop, "save_recipe", fail)
+    monkeypatch.setattr(desktop, "save_managed_recipe", fail)
     dialog.store_recipe_button.click()
     assert "Recipe not saved: Disk unavailable" in dialog._error.text()
     assert dialog._recipe_path is None
@@ -1523,17 +1530,17 @@ def test_loaded_recipe_starts_only_after_start_and_confirmation(window, camera_s
     window.load_recipe_button.click()
     assert window.camera.trial is None
     assert window.run_record is None
-    assert window.specimen.text() == "PCB-LOADED-005"
+    assert window.specimen.text() == "PCB-TEST-001"
     window.trial_button.click()
     if accepted:
         assert window.camera.trial.recipe == recipe
-        assert window.run_record.specimen_id == "PCB-LOADED-005"
-        assert window.specimen.text() == "PCB-LOADED-005"
+        assert window.run_record.specimen_id == "PCB-TEST-001"
+        assert window.specimen.text() == "PCB-TEST-001"
         assert not window.specimen.isEnabled()
     else:
         assert window.camera.trial is None
         assert window.run_record is None
-        assert window.specimen.text() == "PCB-LOADED-005"
+        assert window.specimen.text() == "PCB-TEST-001"
 
 
 @pytest.mark.parametrize("connected", [False, True])
@@ -1558,7 +1565,7 @@ def test_load_recipe_opens_without_specimen_and_does_not_start(window, camera_st
     assert "Start marker:" in window.run_label.toolTip()
     assert "Position marker:" in window.run_label.toolTip()
     assert window._camera_recipe == recipe
-    assert window.specimen.text() == "PCB-LOADED-005"
+    assert window.specimen.text() == ""
     assert window.camera.trial is None if connected else window.camera is None
     assert window.run_record is None
     assert window.lifecycle.snapshot.state == RunState.STOPPED
@@ -1573,7 +1580,7 @@ def test_cancelling_recipe_picker_preserves_selection(window, monkeypatch, tmp_p
     monkeypatch.setattr(desktop.QFileDialog, "getOpenFileName", lambda *args: ("", ""))
     window.load_recipe_button.click()
     assert window._camera_recipe == recipe
-    assert window.specimen.text() == "PCB-LOADED-005"
+    assert window.specimen.text() == "PCB-TEST-001"
     assert window.run_record is None
 
 
@@ -1632,7 +1639,7 @@ def test_bound_recipe_preserves_precise_regions_on_confirmation(region_dialog, t
     dialog._confirmed.setChecked(True)
     assert dialog._candidate_recipe(require_confirmation=True) == stored.recipe
     assert "Threshold 0.500" in dialog.recipe_file.toolTip()
-    assert not dialog.store_recipe_button.isEnabled()
+    assert dialog.store_recipe_button.isEnabled()
 
 
 def test_missing_bundled_model_rejects_recipe_without_replacing_selection(window, monkeypatch, tmp_path):
@@ -1794,6 +1801,7 @@ def test_live_cycle_recipe_counts_inspections_and_preserves_defects(window, came
 
 def test_training_export_can_be_saved_as_a_model_bound_recipe(candidate_dialog, monkeypatch, tmp_path):
     dialog = candidate_dialog
+    dialog.family_name.setText("A-type standard bending")
     from rdt_monitor.recipes import load_recipe
 
     finish_candidate_review(dialog)
@@ -1820,6 +1828,7 @@ def test_training_export_can_be_saved_as_a_model_bound_recipe(candidate_dialog, 
 
 def test_invalid_review_band_is_reported_without_saving(candidate_dialog, monkeypatch, tmp_path):
     dialog = candidate_dialog
+    dialog.family_name.setText("A-type standard bending")
     finish_candidate_review(dialog)
     model = tmp_path / "model.xml"
     model.write_bytes(b"model")
@@ -2064,6 +2073,7 @@ def test_overlap_priority_and_clear_selected_only(region_dialog):
 def test_coordinate_sync_and_edits_require_fresh_confirmation(region_dialog):
     dialog = region_dialog
     draw_region_pair(dialog)
+    dialog.setup_tabs.setCurrentIndex(1)
     dialog.advanced_button.click()
     assert dialog._coordinate_panel.isVisible()
     dialog._confirmed.setChecked(True)
@@ -2141,6 +2151,7 @@ def test_graphical_editor_native_render(region_dialog, application, tmp_path, si
     assert dialog.preview.width() >= 400
     assert dialog.preview.height() >= 260
     assert dialog.grab().save(str(tmp_path / f"region-editor-{size[0]}x{size[1]}.png"))
+    dialog.setup_tabs.setCurrentIndex(1)
     dialog.advanced_button.click()
     dialog._confirmed.setChecked(True)
     application.processEvents()
@@ -2163,7 +2174,9 @@ def test_graphical_editor_native_render(region_dialog, application, tmp_path, si
 def test_live_settings_require_regions_and_confirmation(window, camera_stub):
     window.connect_camera()
     window.poll()
-    dialog = desktop.ReplaySettings(window.recipe, window, camera_image=window.live_view._image)
+    dialog = desktop.ReplaySettings(
+        window.recipe, window, camera_image=window.live_view._image, specimen_id=window.specimen.text()
+    )
     dialog.recognition_mode.setCurrentIndex(1)
     assert all(spin.value() == 0 for inputs in dialog._regions for spin in inputs)
     original = dialog.recipe
