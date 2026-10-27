@@ -12,6 +12,21 @@ sequence: vision-marker synchronization for the Phase 1 supervised pilot, follow
 by read-only IPC/controller feedback integration in Phase 2. Controller-triggered
 inspection is planned, not currently implemented.
 
+## Display Settings
+
+The monitor opens centered within the current screen's usable area, up to 1440 x 900.
+It remains freely resizable rather than locking an aspect ratio. Short windows keep
+monitoring controls accessible in a scrollable right column; camera images retain
+their own proportions. Window sizing uses Qt's logical pixels and excludes the taskbar.
+Drag the dividers to adjust camera/control widths and the monitoring/evidence heights.
+The latest-inspection ROI remains aligned with the control column when resizing or
+dragging the upper divider. Details and the event log remain independently scrollable.
+
+Choose **Settings** at the top right of the desktop window, beside **Details**.
+Under **Basic settings**, choose **Dark** or **Light** display mode. The change
+applies immediately and is remembered for the next launch, independently of recipes.
+Restart an already running monitor to load this new button; stop any active run safely first.
+
 ## Simple Recipe And Specimen Setup
 
 Camera setup now opens with **Basic** and **Advanced** tabs. These are UI pages,

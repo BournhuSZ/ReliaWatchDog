@@ -63,4 +63,10 @@ describe('Toolbar', () => {
             });
         });
     });
+
+    it('renders settings button', async () => {
+        renderApp({});
+
+        expect(await screen.findByRole('button', { name: /settings/i })).toBeVisible();
+    });
 });

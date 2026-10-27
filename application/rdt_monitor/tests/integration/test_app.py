@@ -6,11 +6,12 @@ from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
 from time import monotonic
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
 import pytest
-from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtCore import QPoint, QRect, QSettings, Qt
 from PyQt6.QtGui import QColor, QImage, QRawFont
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QDialog, QLabel, QStyle, QStyleOptionButton
@@ -20,6 +21,151 @@ from rdt_monitor.camera import CameraFrame, CameraStatus, MarkerTrial
 from rdt_monitor.lifecycle import RunState
 from rdt_monitor.recipes import StoredRecipe, load_recipe, save_recipe
 from rdt_monitor.replay import ReplayPipeline
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+@pytest.mark.parametrize("details", [False, True])
+@pytest.mark.parametrize("size", [(960, 640), (1440, 900)])
+def test_evidence_column_aligns_with_controls_on_resize_and_drag(window, application, tmp_path, mode, details, size):
+    original_stylesheet = application.styleSheet()
+    try:
+        desktop._apply_display_mode(mode)
+        window.resize(*size)
+        window.details_button.setChecked(details)
+        window.show()
+        application.processEvents()
+        application.processEvents()
+        assert (window.width(), window.height()) == size
+        assert window._roi_panel.width() == window.controls_scroll.width()
+        assert window._roi_panel.mapTo(window, QPoint()).x() == window.controls_scroll.mapTo(window, QPoint()).x()
+        assert window.roi_view.width() > 0
+        assert window.history.visibleRegion().isEmpty() is False
+        assert window.grab().save(str(tmp_path / f"geometry-{mode}-{size[0]}-details-{details}.png"))
+        columns = window.controls_scroll.parentWidget()
+        assert columns.handleWidth() >= 6
+        columns.moveSplitter(columns.width() - 330 - columns.handleWidth(), 1)
+        application.processEvents()
+        assert window._roi_panel.width() == window.controls_scroll.width()
+        assert window._roi_panel.mapTo(window, QPoint()).x() == window.controls_scroll.mapTo(window, QPoint()).x()
+        window.resize(1280, 800)
+        application.processEvents()
+        application.processEvents()
+        assert window._roi_panel.width() == window.controls_scroll.width()
+        assert window._roi_panel.mapTo(window, QPoint()).x() == window.controls_scroll.mapTo(window, QPoint()).x()
+        assert window.camera is None
+    finally:
+        application.setStyleSheet(original_stylesheet)
+
+
+@pytest.mark.parametrize("screen_size", [(1366, 720), (1024, 768), (1920, 1040)])
+def test_window_fits_available_screen_including_frame(window, application, monkeypatch, screen_size):
+    available = QRect(120, 80, *screen_size)
+    monkeypatch.setattr(window, "screen", lambda: SimpleNamespace(availableGeometry=lambda: available))
+    window._fit_available_screen()
+    window.show()
+    application.processEvents()
+    assert available.contains(window.frameGeometry())
+    assert window.width() <= 1440
+    assert window.height() <= 900
+    assert not window.isMaximized()
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+@pytest.mark.parametrize("size", [(960, 640), (1280, 720), (1440, 900)])
+def test_short_window_keeps_header_and_actions_reachable(window, application, tmp_path, mode, size):
+    original_stylesheet = application.styleSheet()
+    try:
+        desktop._apply_display_mode(mode)
+        window.resize(*size)
+        window.show()
+        application.processEvents()
+        assert (window.width(), window.height()) == size
+        for control in (window.specimen, window.basic_settings_button, window.connect_button):
+            assert window.rect().contains(QRect(control.mapTo(window, QPoint()), control.size()))
+        assert window.grab().save(str(tmp_path / f"fit-{mode}-{size[0]}.png"))
+        window.controls_scroll.ensureWidgetVisible(window.results_button)
+        application.processEvents()
+        position = window.results_button.mapTo(window.controls_scroll.viewport(), QPoint())
+        assert position.y() >= 0
+        assert position.y() + window.results_button.height() <= window.controls_scroll.viewport().height()
+        assert window.grab().save(str(tmp_path / f"actions-{mode}-{size[0]}.png"))
+        assert window.camera is None
+    finally:
+        application.setStyleSheet(original_stylesheet)
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+@pytest.mark.parametrize("size", [(1024, 768), (1513, 900)])
+def test_toolbar_polish_fits_both_themes_and_preserves_menus(window, application, tmp_path, mode, size):
+    original_stylesheet = application.styleSheet()
+    try:
+        desktop._apply_display_mode(mode)
+        window.resize(*size)
+        window.recipe_summary.setText("Coil family / Long specimen inspection recipe / revision 2026-10-27")
+        window.show()
+        window.activateWindow()
+        application.processEvents()
+        controls = [window.specimen, window.details_button, window.basic_settings_button]
+        assert {control.height() for control in controls} == {36}
+        for control in [*controls, window.connect_button, window.disconnect_button, window.recipe_summary]:
+            assert control.isVisible()
+            top_left = control.mapTo(window, desktop.QPointF(0, 0).toPoint())
+            assert top_left.x() >= 0
+            assert top_left.x() + control.width() <= window.width()
+        assert window.specimen.mapToGlobal(desktop.QPointF(0, 0).toPoint()).y() == controls[-1].mapToGlobal(
+            desktop.QPointF(0, 0).toPoint()
+        ).y()
+        capture = tmp_path / f"toolbar-{mode}-{size[0]}.png"
+        assert window.grab().save(str(capture))
+        print(f"Toolbar capture: {capture}")
+        for menu in (window.diagnostics_menu, window.inspection_menu):
+            menu.popup(window.menuBar().mapToGlobal(window.menuBar().actionGeometry(menu.menuAction()).bottomLeft()))
+            application.processEvents()
+            assert menu.isVisible()
+            assert all(action.text() for action in menu.actions())
+            assert menu.grab().save(str(tmp_path / f"{menu.title()}-{mode}.png"))
+            menu.hide()
+        assert window.camera is None
+    finally:
+        application.setStyleSheet(original_stylesheet)
+
+
+def test_basic_settings_visible_switches_and_restores_display_mode(window, tmp_path, monkeypatch):
+    preferences = QSettings(str(tmp_path / "preferences.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(desktop, "QSettings", lambda *args: preferences)
+    application = QApplication.instance()
+    original_stylesheet = application.styleSheet()
+    selections = []
+
+    def inspect_dialog(dialog):
+        assert dialog.windowTitle() == "Basic settings"
+        picker = dialog.findChild(desktop.QComboBox)
+        selections.append(picker.currentText())
+        picker.setCurrentText("Dark")
+        picker.setCurrentText("Light")
+        assert preferences.value("display_mode") == "light"
+        assert "#F4F5F7" in application.styleSheet()
+        window.grab().save(str(tmp_path / "settings-light.png"))
+        picker.setCurrentText("Dark")
+        assert preferences.value("display_mode") == "dark"
+        assert "#F4F5F7" not in application.styleSheet()
+        window.grab().save(str(tmp_path / "settings-dark.png"))
+        preferences.setValue("display_mode", "light")
+        return 0
+
+    monkeypatch.setattr(QDialog, "exec", inspect_dialog)
+    try:
+        window.resize(1024, 768)
+        window.show()
+        application.processEvents()
+        assert window.basic_settings_button.isVisible()
+        assert window.basic_settings_button.text() == "Settings"
+        window._basic_settings()
+        window._basic_settings()
+        assert selections == ["Dark", "Light"]
+        assert window.camera is None
+    finally:
+        application.setStyleSheet(original_stylesheet)
 
 
 @pytest.fixture

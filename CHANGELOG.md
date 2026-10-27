@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- RDT desktop toolbar Settings button with a Basic settings dialog and persistent light/dark display preference, separate from inspection recipes.
 - RDT camera setup now has Basic and Advanced tabs, named family recipes, specimen name/batch metadata, model-preserving marker adjustments, and frozen per-run setup snapshots. New reusable recipe revisions preserve previous files and share existing detector bundles.
 - RDT shows the latest exact-cycle inspection ROI with an anomaly heatmap below monitoring controls, refreshes it after each cycle result and outlines the recipe inspection ROI on the live camera preview.
 - RDT latest-cycle green/normal, yellow/review, red/defect and grey/uninspected indicators, with a separate latched red alarm; recipe-bound review margins default to 0.05. New results are grouped under inspection-results by run, verdict and zero-padded cycle, with per-cycle images, metadata and explicit failure records when storage permits.
@@ -25,6 +26,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- RDT inspection ROI and monitoring columns stay aligned during resizing and splitter drags; wider splitter targets, consistent evidence headings, themed horizontal scrollbars and light-mode disabled controls improve desktop geometry and readability.
+- RDT desktop menus, header and camera controls use aligned compact sizing, clearer action/status grouping, and consistent light/dark hover, selected and focus states.
 - RDT recipe loading preserves the current specimen serial instead of restoring the training specimen's serial. Station-wide authorization and production qualification remain pending.
 - RDT always shows the event log at the bottom of the monitoring screen; Details toggles technical information separately without hiding the log.
 - RDT adopts the supplied industrial monitor reference with a framed camera, circular latest-inspection verdict, separate latched alarm and right-side run controls; camera connection/freshness remains distinct from inspection and technical details stay collapsed.
@@ -34,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- RDT startup window fits the available screen and taskbar area instead of enforcing a 1024 x 768 minimum; short windows retain access to monitoring actions through a scrollable control column.
 - RDT recipe Load/Save dialogs now default to a single repository-level recipes directory instead of training output folders or unspecified locations.
 - RDT recipe loading now distinguishes counting-only and model-bound recipes, retains selected recipe identity across camera connection/start, exposes marker/model/ROI details, rejects missing bundled models, and no longer falsely logs detector unavailability while live inference is pending.
 - RDT training exports a fixed batch-one OpenVINO detector using ONNX opset 18, avoiding batch-two input rejection and unsupported opset-14 downgrades.

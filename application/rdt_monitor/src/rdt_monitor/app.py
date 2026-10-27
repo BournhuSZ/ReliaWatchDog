@@ -17,7 +17,18 @@ from uuid import uuid4
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import QPointF, QProcess, QProcessEnvironment, QRectF, QSignalBlocker, Qt, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import (
+    QPointF,
+    QProcess,
+    QProcessEnvironment,
+    QRectF,
+    QSettings,
+    QSignalBlocker,
+    Qt,
+    QTimer,
+    QUrl,
+    pyqtSignal,
+)
 from PyQt6.QtGui import (
     QCloseEvent,
     QColor,
@@ -30,6 +41,7 @@ from PyQt6.QtGui import (
     QPainterPath,
     QPaintEvent,
     QPen,
+    QResizeEvent,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -2191,8 +2203,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         RECIPE_DIRECTORY.mkdir(parents=True, exist_ok=True)
         self.setWindowTitle("RDT Reliability Monitor")
-        self.resize(1280, 840)
-        self.setMinimumSize(1024, 768)
+        self.resize(1440, 900)
+        self.setMinimumSize(960, 640)
         self.recipe = fixture_recipe()
         self.pipeline: ReplayPipeline | None = None
         self.camera: CameraPreview | None = None
@@ -2225,9 +2237,13 @@ class MainWindow(QMainWindow):
         central.setObjectName("monitorSurface")
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setContentsMargins(16, 10, 16, 14)
         layout.setSpacing(12)
-        heading = QHBoxLayout()
+        header = QWidget()
+        header.setObjectName("monitorHeader")
+        heading = QHBoxLayout(header)
+        heading.setContentsMargins(0, 0, 0, 4)
+        heading.setSpacing(12)
         title = QLabel("RDT RELIABILITY MONITOR")
         title.setObjectName("title")
         heading.addWidget(title)
@@ -2248,18 +2264,34 @@ class MainWindow(QMainWindow):
         self.specimen.setPlaceholderText("Specimen ID")
         self.specimen.setMaxLength(128)
         self.specimen.setMaximumWidth(170)
+        self.specimen.setFixedHeight(36)
         heading.addWidget(self.specimen)
         self.details_button = QPushButton("Details")
         self.details_button.setCheckable(True)
         self.details_button.setAccessibleName("Show technical details")
+        self.details_button.setToolTip("Show or hide technical details")
+        self.details_button.setFixedHeight(36)
+        utility_divider = QFrame()
+        utility_divider.setObjectName("toolbarDivider")
+        utility_divider.setFixedSize(1, 24)
+        heading.addWidget(utility_divider)
         heading.addWidget(self.details_button)
-        layout.addLayout(heading)
+        self.basic_settings_button = self._button(
+            "Settings", QStyle.StandardPixmap.SP_FileDialogDetailedView, self._basic_settings
+        )
+        self.basic_settings_button.setToolTip("Basic settings")
+        self.basic_settings_button.setFixedHeight(36)
+        heading.addWidget(self.basic_settings_button)
+        layout.addWidget(header)
         self.load_recipe_button = self._button(
             "Load recipe", QStyle.StandardPixmap.SP_DialogOpenButton, self.load_marker_recipe
         )
         self.load_recipe_button.setToolTip("Load a stored synchronization recipe for review and confirmation")
         self.load_recipe_button.setEnabled(True)
-        camera_bar = QHBoxLayout()
+        camera_toolbar = QWidget()
+        camera_toolbar.setObjectName("cameraToolbar")
+        camera_bar = QHBoxLayout(camera_toolbar)
+        camera_bar.setContentsMargins(0, 0, 0, 0)
         camera_bar.setSpacing(8)
         self.camera_index = QSpinBox()
         self.camera_index.setRange(0, 99)
@@ -2272,13 +2304,22 @@ class MainWindow(QMainWindow):
             self.disconnect_camera,
         )
         self.disconnect_button.setEnabled(False)
+        self.connect_button.setFixedHeight(36)
+        self.disconnect_button.setFixedHeight(36)
         camera_bar.addWidget(self.connect_button)
         camera_bar.addWidget(self.disconnect_button)
-        camera_bar.addStretch()
+        recipe_divider = QFrame()
+        recipe_divider.setObjectName("toolbarDivider")
+        recipe_divider.setFixedSize(1, 24)
+        camera_bar.addSpacing(4)
+        camera_bar.addWidget(recipe_divider)
+        camera_bar.addSpacing(4)
         self.recipe_summary = QLabel("No recipe loaded")
         self.recipe_summary.setObjectName("caption")
         self.recipe_summary.setTextFormat(Qt.TextFormat.PlainText)
         self.recipe_summary.setWordWrap(True)
+        self.recipe_summary.setMinimumWidth(0)
+        self.recipe_summary.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         camera_bar.addWidget(self.recipe_summary, 1)
         self.trial_button = self._button("Start", QStyle.StandardPixmap.SP_MediaPlay, self.start_marker_trial)
         self.trial_button.setToolTip(
@@ -2295,7 +2336,7 @@ class MainWindow(QMainWindow):
         self.camera_details = QLabel("Camera disconnected")
         self.camera_details.setWordWrap(True)
         self.camera_details.setObjectName("caption")
-        layout.addLayout(camera_bar)
+        layout.addWidget(camera_toolbar)
         self.source_label = QLabel("Source: none")
         self.source_label.setWordWrap(True)
         self.source_label.setTextFormat(Qt.TextFormat.PlainText)
@@ -2305,7 +2346,10 @@ class MainWindow(QMainWindow):
         self.source_label.setObjectName("caption")
         self.run_label.setObjectName("caption")
         vertical = QSplitter(Qt.Orientation.Vertical)
+        vertical.setHandleWidth(6)
         horizontal = QSplitter(Qt.Orientation.Horizontal)
+        horizontal.setHandleWidth(6)
+        horizontal.setChildrenCollapsible(False)
         preview_area = QFrame()
         preview_area.setObjectName("cameraPanel")
         preview_layout = QVBoxLayout(preview_area)
@@ -2332,8 +2376,6 @@ class MainWindow(QMainWindow):
         self._recognition_status = "Recognition not configured"
         horizontal.addWidget(preview_area)
         sidebar = QWidget()
-        sidebar.setMinimumWidth(310)
-        sidebar.setMaximumWidth(370)
         side = QVBoxLayout(sidebar)
         side.setContentsMargins(10, 0, 0, 0)
         side.setSpacing(8)
@@ -2447,7 +2489,16 @@ class MainWindow(QMainWindow):
             self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton), "Collect and train"
         )
         self.training_action.triggered.connect(self.open_training_collection)
-        horizontal.addWidget(sidebar)
+        self.controls_scroll = QScrollArea()
+        self.controls_scroll.setObjectName("monitorControlsScroll")
+        self.controls_scroll.setAccessibleName("Inspection and monitoring controls")
+        self.controls_scroll.setWidgetResizable(True)
+        self.controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.controls_scroll.setMinimumWidth(310)
+        self.controls_scroll.setMaximumWidth(370)
+        self.controls_scroll.setWidget(sidebar)
+        horizontal.addWidget(self.controls_scroll)
         horizontal.setStretchFactor(0, 3)
         horizontal.setStretchFactor(1, 1)
         horizontal.setSizes([820, 340])
@@ -2493,6 +2544,7 @@ class MainWindow(QMainWindow):
         self.details_scroll.setMinimumSize(250, 100)
         self.details_scroll.setWidget(self.details_panel)
         bottom = QSplitter(Qt.Orientation.Horizontal)
+        bottom.setHandleWidth(6)
         bottom.addWidget(self.details_scroll)
         self.details_scroll.hide()
         self.event_log_panel = QWidget()
@@ -2500,7 +2552,7 @@ class MainWindow(QMainWindow):
         event_log_layout.setContentsMargins(0, 6, 0, 0)
         event_log_layout.setSpacing(6)
         history_heading = QLabel("Event log")
-        history_heading.setObjectName("sectionTitle")
+        history_heading.setObjectName("panelTitle")
         history_heading.setToolTip("Session-only log, limited to 500 events")
         event_log_layout.addWidget(history_heading)
         self.history = QTableWidget(0, 6)
@@ -2521,13 +2573,15 @@ class MainWindow(QMainWindow):
         event_log_layout.addWidget(self.history)
         bottom.addWidget(self.event_log_panel)
         roi_panel = QWidget()
+        self._roi_panel = roi_panel
         roi_panel.setMinimumWidth(310)
         roi_panel.setMaximumWidth(370)
         roi_layout = QVBoxLayout(roi_panel)
         roi_layout.setContentsMargins(10, 6, 0, 0)
         roi_layout.setSpacing(6)
         self.roi_caption = QLabel("Latest inspection ROI - no result")
-        self.roi_caption.setObjectName("sectionTitle")
+        self.roi_caption.setObjectName("panelTitle")
+        self.roi_caption.setWordWrap(True)
         roi_layout.addWidget(self.roi_caption)
         self.roi_view = LiveView()
         self.roi_view.setMinimumSize(120, 60)
@@ -2541,6 +2595,7 @@ class MainWindow(QMainWindow):
         bottom.setChildrenCollapsible(False)
         bottom.setStretchFactor(0, 1)
         bottom.setStretchFactor(1, 2)
+        horizontal.splitterMoved.connect(self._align_evidence_column)
         vertical.addWidget(bottom)
         vertical.setChildrenCollapsible(False)
         self.details_button.toggled.connect(self._toggle_details)
@@ -2557,19 +2612,44 @@ class MainWindow(QMainWindow):
         self._timer.setInterval(33)
         self._timer.timeout.connect(self.poll)
         self._timer.start()
-        for first, second in (
-            (self.specimen, self.connect_button),
-            (self.camera_index, self.connect_button),
-            (self.connect_button, self.disconnect_button),
-            (self.disconnect_button, self.load_recipe_button),
-            (self.load_recipe_button, self.trial_button),
-            (self.trial_button, self.stop_work_button),
-            (self.stop_work_button, self.results_button),
-            (self.results_button, self.details_button),
-            (self.details_button, self.camera_index),
-            (self.camera_index, self.history),
-        ):
+        focus_order = (
+            self.specimen,
+            self.connect_button,
+            self.disconnect_button,
+            self.load_recipe_button,
+            self.trial_button,
+            self.stop_work_button,
+            self.results_button,
+            self.details_button,
+            self.basic_settings_button,
+            self.camera_index,
+            self.history,
+        )
+        for first, second in zip(focus_order[:-1], focus_order[1:], strict=True):
             QWidget.setTabOrder(first, second)
+        self._fit_available_screen()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """Keep inspection evidence aligned with the monitoring column after resizing.
+
+        Args:
+            event (QResizeEvent): Native window resize notification.
+        """
+        super().resizeEvent(event)
+        if hasattr(self, "_roi_panel"):
+            QTimer.singleShot(0, self._align_evidence_column)
+
+    def _align_evidence_column(self) -> None:
+        self._roi_panel.setFixedWidth(self.controls_scroll.width())
+
+    def _fit_available_screen(self) -> None:
+        screen = self.screen()
+        if screen is None:
+            return
+        available = screen.availableGeometry().adjusted(16, 16, -16, -48)
+        self.setMinimumSize(min(960, available.width()), min(640, available.height()))
+        self.resize(min(1440, available.width()), min(900, available.height()))
+        self.move(available.center() - self.rect().center())
 
     def open_offline_inspection(self) -> None:
         """Open independent offline inspection without changing the active camera run."""
@@ -3448,6 +3528,41 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
+    def _basic_settings(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Basic settings")
+        dialog.setMinimumWidth(320)
+        layout = QVBoxLayout(dialog)
+        appearance = QFormLayout()
+        display_mode = QComboBox()
+        display_mode.setAccessibleName("Display mode")
+        display_mode.addItems(["Dark", "Light"])
+        preferences = QSettings("Anomalib", "RDT Reliability Monitor")
+        display_mode.setCurrentText("Light" if preferences.value("display_mode", "dark") == "light" else "Dark")
+
+        def change_display_mode(text: str) -> None:
+            mode = text.lower()
+            preferences.setValue("display_mode", mode)
+            _apply_display_mode(mode)
+
+        display_mode.currentTextChanged.connect(change_display_mode)
+        appearance.addRow("Display mode", display_mode)
+        layout.addLayout(appearance)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
+
+
+def _apply_display_mode(mode: str) -> None:
+    application = QApplication.instance()
+    if application is not None:
+        stylesheet = files("rdt_monitor").joinpath("styles.qss").read_text(encoding="utf-8")
+        if mode == "light":
+            stylesheet += files("rdt_monitor").joinpath("styles-light.qss").read_text(encoding="utf-8")
+        application.setStyleSheet(stylesheet)
+
+
 def main() -> int:
     """Launch the reliability monitor with inspection qualification gates intact.
 
@@ -3459,7 +3574,8 @@ def main() -> int:
     families = set(QFontDatabase.families())
     family = next((name for name in ("IBM Plex Sans", "Inter") if name in families), application.font().family())
     application.setFont(QFont(family, 10))
-    application.setStyleSheet(files("rdt_monitor").joinpath("styles.qss").read_text(encoding="utf-8"))
+    preferences = QSettings("Anomalib", "RDT Reliability Monitor")
+    _apply_display_mode(str(preferences.value("display_mode", "dark")))
     window = MainWindow()
     window.show()
     return application.exec()
