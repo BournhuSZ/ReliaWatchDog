@@ -51,6 +51,16 @@
     --spectrum-positive-visual-color: var(--brand-moss);
 }
 
+:root[data-display-mode='light'] {
+    --background: #f5f7fa;
+    --background-inverse: #ffffff;
+}
+
+:root[data-display-mode='dark'] {
+    --background: #313236;
+    --background-inverse: #3c3e42;
+}
+
 body,
 html {
     margin: 0;

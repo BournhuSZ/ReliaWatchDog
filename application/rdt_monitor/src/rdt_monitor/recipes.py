@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
 from math import isfinite
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -16,6 +17,7 @@ from uuid import uuid4
 
 import numpy as np
 
+from rdt_monitor.collection import atomic_bytes, local_file
 from rdt_monitor.detection import DetectionSettings
 from rdt_monitor.domain import SyncConfig
 from rdt_monitor.lifecycle import InspectionOutcome
@@ -31,6 +33,12 @@ def _object(value: object, keys: set[str]) -> dict[str, object]:
 def _integer(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("Expected an integer in recipe")
+    return value
+
+
+def _text(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Expected text in recipe")
     return value
 
 
@@ -155,6 +163,49 @@ def file_digest(path: Path) -> str:
 
 
 @dataclass(frozen=True)
+class RecipeProfile:
+    """Reusable family recipe metadata, independent of specimen serial numbers.
+
+    Args:
+        family_id (str): Stable generated family identity.
+        revision (str): Unique immutable recipe revision.
+        name (str): Operator-friendly purpose-based recipe name.
+        notes (str): Optional purpose notes.
+    """
+
+    family_id: str
+    revision: str
+    name: str
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        for value in (self.family_id, self.revision):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{32}", value):
+                raise ValueError("Family and revision identities must be generated UUID hex strings")
+        if not isinstance(self.name, str) or not self.name.strip() or len(self.name) > 128:
+            raise ValueError("Recipe name must contain 1-128 characters")
+        if not isinstance(self.notes, str) or len(self.notes) > 2000:
+            raise ValueError("Recipe purpose notes must contain at most 2000 characters")
+
+
+@dataclass(frozen=True)
+class SpecimenDetails:
+    """Optional specimen metadata, never used to construct filesystem paths.
+
+    Args:
+        name (str): Specimen display name.
+        batch (str): Batch or lot identifier.
+    """
+
+    name: str = ""
+    batch: str = ""
+
+    def __post_init__(self) -> None:
+        if any(not isinstance(value, str) or len(value) > 128 for value in (self.name, self.batch)):
+            raise ValueError("Specimen name and batch must contain at most 128 characters")
+
+
+@dataclass(frozen=True)
 class StoredRecipe:
     """Synchronization settings associated with a specimen and source dimensions.
 
@@ -164,6 +215,8 @@ class StoredRecipe:
         image_width (int): Source image width used during setup.
         image_height (int): Source image height used during setup.
         detector (RecipeDetector | None): Optional unqualified live detector binding.
+        profile (RecipeProfile | None): Named family recipe; absent in legacy recipes.
+        specimen (SpecimenDetails): Optional name and batch for the specimen setup.
 
     Raises:
         ValueError: If identity, dimensions, or regions are unsuitable for storage.
@@ -174,6 +227,8 @@ class StoredRecipe:
     image_width: int
     image_height: int
     detector: RecipeDetector | None = None
+    profile: RecipeProfile | None = None
+    specimen: SpecimenDetails = SpecimenDetails()
 
     @property
     def mode_label(self) -> str:
@@ -199,6 +254,8 @@ class StoredRecipe:
             if self.recipe.marker_appearance is not None
             else "Recognition: brightness (no appearance references)",
         ]
+        if self.profile is not None:
+            lines.extend((f"Recipe: {self.profile.name}", self.profile.notes, f"Revision: {self.profile.revision}"))
         if self.detector is not None:
             lines.extend(
                 (
@@ -237,6 +294,8 @@ def save_recipe(path: Path, stored: StoredRecipe) -> None:
     """
     document = asdict(stored)
     document.pop("detector")
+    document.pop("profile")
+    document.pop("specimen")
     if stored.recipe.marker_appearance is None:
         document["recipe"].pop("marker_appearance")
         document["recipe"].pop("position_appearance")
@@ -246,6 +305,11 @@ def save_recipe(path: Path, stored: StoredRecipe) -> None:
     if stored.detector is not None:
         document["detector"] = asdict(stored.detector)
         document["schema_version"] = 4
+    if stored.profile is not None:
+        document["schema_version"] = 5
+        document["profile"] = asdict(stored.profile)
+        document["specimen"] = asdict(stored.specimen)
+        document["detector"] = asdict(stored.detector) if stored.detector is not None else None
     temporary: Path | None = None
     try:
         with NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as stream:
@@ -280,13 +344,15 @@ def load_recipe(path: Path) -> StoredRecipe:
     try:
         raw = json.loads(content)
         keys = {"schema_version", "specimen_id", "recipe", "image_width", "image_height"}
-        if isinstance(raw, dict) and raw.get("schema_version") in (3, 4):
+        if isinstance(raw, dict) and raw.get("schema_version") in (3, 4, 5):
             keys.add("detector")
+        if isinstance(raw, dict) and raw.get("schema_version") == 5:
+            keys |= {"profile", "specimen"}
         document = _object(raw, keys)
     except (UnicodeError, RecursionError) as error:
         raise ValueError("Recipe file must contain valid JSON text") from error
     version = _integer(document["schema_version"])
-    if version not in (1, 2, 3, 4):
+    if version not in (1, 2, 3, 4, 5):
         raise ValueError("Unsupported recipe schema version")
     specimen_id = document["specimen_id"]
     if not isinstance(specimen_id, str):
@@ -294,7 +360,7 @@ def load_recipe(path: Path) -> StoredRecipe:
     fields = {"synchronization", "marker", "position", "brightness", "absent_fraction", "present_fraction"}
     if not isinstance(document["recipe"], dict):
         raise ValueError("Recipe settings must be an object")
-    has_appearance = version == 2 or (version in (3, 4) and "marker_appearance" in document["recipe"])
+    has_appearance = version == 2 or (version in (3, 4, 5) and "marker_appearance" in document["recipe"])
     if has_appearance:
         fields |= {"marker_appearance", "position_appearance"}
     settings = _object(document["recipe"], fields)
@@ -314,22 +380,126 @@ def load_recipe(path: Path) -> StoredRecipe:
         position_appearance=_appearance(settings["position_appearance"]) if has_appearance else None,
     )
     detector = None
-    if version in (3, 4):
+    if version in (3, 4) or (version == 5 and document["detector"] is not None):
         fields = {"model_file", "model_sha256", "weights_sha256", "region", "threshold"}
-        if version == 4:
+        if version >= 4:
             fields.add("review_margin")
         binding = _object(document["detector"], fields)
         detector = RecipeDetector(
-            binding["model_file"],
-            binding["model_sha256"],
-            binding["weights_sha256"],
+            _text(binding["model_file"]),
+            _text(binding["model_sha256"]),
+            _text(binding["weights_sha256"]),
             _region(binding["region"]),
             _number(binding["threshold"]),
-            _number(binding["review_margin"]) if version == 4 else 0.05,
+            _number(binding["review_margin"]) if version >= 4 else 0.05,
         )
+    profile = None
+    specimen = SpecimenDetails()
+    if version == 5:
+        metadata = _object(document["profile"], {"family_id", "revision", "name", "notes"})
+        profile = RecipeProfile(*(_text(metadata[key]) for key in ("family_id", "revision", "name", "notes")))
+        details = _object(document["specimen"], {"name", "batch"})
+        specimen = SpecimenDetails(_text(details["name"]), _text(details["batch"]))
     return StoredRecipe(
-        specimen_id.strip(), recipe, _integer(document["image_width"]), _integer(document["image_height"]), detector
+        specimen_id.strip(),
+        recipe,
+        _integer(document["image_width"]),
+        _integer(document["image_height"]),
+        detector,
+        profile,
+        specimen,
     )
+
+
+def specimen_setup(
+    original: StoredRecipe, specimen_id: str, recipe: ReplayRecipe, details: SpecimenDetails
+) -> StoredRecipe:
+    """Create a run-specific marker setup without changing the family inspection definition.
+
+    Args:
+        original (StoredRecipe): Selected family recipe.
+        specimen_id (str): Actual specimen serial number.
+        recipe (ReplayRecipe): Candidate marker setup.
+        details (SpecimenDetails): Specimen name and batch.
+
+    Returns:
+        StoredRecipe: Frozen setup retaining the exact detector and family binding.
+
+    Raises:
+        ValueError: If technical synchronization changes have not been saved as a new recipe revision.
+    """
+    unchanged = replace(
+        recipe,
+        marker=original.recipe.marker,
+        position=original.recipe.position,
+        marker_appearance=original.recipe.marker_appearance,
+        position_appearance=original.recipe.position_appearance,
+    )
+    if unchanged != original.recipe:
+        raise ValueError("Save a new recipe revision before using changed technical synchronization settings")
+    return replace(original, specimen_id=specimen_id.strip(), recipe=recipe, specimen=details)
+
+
+def save_managed_recipe(path: Path, stored: StoredRecipe, *, source: Path | None = None) -> None:
+    """Save a new recipe revision, preserving existing recipe files.
+
+    Args:
+        path (Path): New destination; existing files cannot be overwritten.
+        stored (StoredRecipe): Named recipe with a fresh revision.
+        source (Path | None): Original recipe path for resolving an existing detector.
+
+    Raises:
+        ValueError: If naming or model reference requirements are not met.
+        FileExistsError: If the destination already exists.
+    """
+    if stored.profile is None:
+        raise ValueError("Enter a purpose-based recipe name")
+    if path.exists():
+        raise FileExistsError("Choose a new filename to preserve the previous recipe revision")
+    if stored.detector is not None:
+        if source is None or path.parent.resolve() != source.parent.resolve():
+            raise ValueError("Save beside the original recipe to reuse its existing detector bundle")
+        stored.detector.settings(source)
+    save_recipe(path, stored)
+
+
+def save_run_setup(root: Path, run_id: str, stored: StoredRecipe, source: Path | None) -> Path:
+    """Persist a run's complete setup before accepting camera cycles.
+
+    Args:
+        root (Path): Explicit evidence root.
+        run_id (str): Generated run identity.
+        stored (StoredRecipe): Frozen specimen-specific setup.
+        source (Path | None): Reusable recipe selected for this run.
+
+    Returns:
+        Path: Run setup snapshot, separate from reusable recipe files.
+
+    Raises:
+        OSError: If storage or the parent recipe is unavailable.
+        ValueError: If output confinement or identity validation fails.
+    """
+    if not re.fullmatch(r"[0-9a-f]{12}", run_id):
+        raise ValueError("Run setup requires a generated run identity")
+    if root.is_symlink() or root.resolve() != root.absolute():
+        raise ValueError("Run setup directory escapes the selected evidence root")
+    root.mkdir(parents=True, exist_ok=True)
+    destination = local_file(root, f"run-{run_id}-setup.json")
+    if destination.exists():
+        raise FileExistsError("Run setup snapshot already exists")
+    document = {
+        "schema_version": 1,
+        "qualified": False,
+        "run_id": run_id,
+        "setup_id": uuid4().hex,
+        "recorded_utc": datetime.now(UTC).isoformat(),
+        "verification": "Operator-declared marker, inspection crop and test-cycle check; not qualification",
+        "recipe_source": str(source.resolve()) if source is not None else None,
+        "recipe_sha256": file_digest(source) if source is not None else None,
+        "setup": asdict(stored),
+    }
+    atomic_bytes(destination, json.dumps(document, indent=2, allow_nan=False).encode("utf-8"))
+    return destination
 
 
 def save_inspection_recipe(
@@ -354,6 +524,9 @@ def save_inspection_recipe(
         ValueError: If inputs or output confinement are invalid.
         OSError: If copying or saving fails.
     """
+    if stored.profile is not None:
+        if path.exists():
+            raise FileExistsError("Choose a new filename to preserve the previous recipe revision")
     DetectionSettings(model, region, threshold)
     if model.suffix.lower() != ".xml":
         raise ValueError("Inspection recipes require an OpenVINO XML/BIN export")

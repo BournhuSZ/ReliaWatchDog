@@ -6,11 +6,12 @@ from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
 from time import monotonic
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
 import pytest
-from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtCore import QPoint, QRect, QSettings, Qt
 from PyQt6.QtGui import QColor, QImage, QRawFont
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QDialog, QLabel, QStyle, QStyleOptionButton
@@ -20,6 +21,151 @@ from rdt_monitor.camera import CameraFrame, CameraStatus, MarkerTrial
 from rdt_monitor.lifecycle import RunState
 from rdt_monitor.recipes import StoredRecipe, load_recipe, save_recipe
 from rdt_monitor.replay import ReplayPipeline
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+@pytest.mark.parametrize("details", [False, True])
+@pytest.mark.parametrize("size", [(960, 640), (1440, 900)])
+def test_evidence_column_aligns_with_controls_on_resize_and_drag(window, application, tmp_path, mode, details, size):
+    original_stylesheet = application.styleSheet()
+    try:
+        desktop._apply_display_mode(mode)
+        window.resize(*size)
+        window.details_button.setChecked(details)
+        window.show()
+        application.processEvents()
+        application.processEvents()
+        assert (window.width(), window.height()) == size
+        assert window._roi_panel.width() == window.controls_scroll.width()
+        assert window._roi_panel.mapTo(window, QPoint()).x() == window.controls_scroll.mapTo(window, QPoint()).x()
+        assert window.roi_view.width() > 0
+        assert window.history.visibleRegion().isEmpty() is False
+        assert window.grab().save(str(tmp_path / f"geometry-{mode}-{size[0]}-details-{details}.png"))
+        columns = window.controls_scroll.parentWidget()
+        assert columns.handleWidth() >= 6
+        columns.moveSplitter(columns.width() - 330 - columns.handleWidth(), 1)
+        application.processEvents()
+        assert window._roi_panel.width() == window.controls_scroll.width()
+        assert window._roi_panel.mapTo(window, QPoint()).x() == window.controls_scroll.mapTo(window, QPoint()).x()
+        window.resize(1280, 800)
+        application.processEvents()
+        application.processEvents()
+        assert window._roi_panel.width() == window.controls_scroll.width()
+        assert window._roi_panel.mapTo(window, QPoint()).x() == window.controls_scroll.mapTo(window, QPoint()).x()
+        assert window.camera is None
+    finally:
+        application.setStyleSheet(original_stylesheet)
+
+
+@pytest.mark.parametrize("screen_size", [(1366, 720), (1024, 768), (1920, 1040)])
+def test_window_fits_available_screen_including_frame(window, application, monkeypatch, screen_size):
+    available = QRect(120, 80, *screen_size)
+    monkeypatch.setattr(window, "screen", lambda: SimpleNamespace(availableGeometry=lambda: available))
+    window._fit_available_screen()
+    window.show()
+    application.processEvents()
+    assert available.contains(window.frameGeometry())
+    assert window.width() <= 1440
+    assert window.height() <= 900
+    assert not window.isMaximized()
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+@pytest.mark.parametrize("size", [(960, 640), (1280, 720), (1440, 900)])
+def test_short_window_keeps_header_and_actions_reachable(window, application, tmp_path, mode, size):
+    original_stylesheet = application.styleSheet()
+    try:
+        desktop._apply_display_mode(mode)
+        window.resize(*size)
+        window.show()
+        application.processEvents()
+        assert (window.width(), window.height()) == size
+        for control in (window.specimen, window.basic_settings_button, window.connect_button):
+            assert window.rect().contains(QRect(control.mapTo(window, QPoint()), control.size()))
+        assert window.grab().save(str(tmp_path / f"fit-{mode}-{size[0]}.png"))
+        window.controls_scroll.ensureWidgetVisible(window.results_button)
+        application.processEvents()
+        position = window.results_button.mapTo(window.controls_scroll.viewport(), QPoint())
+        assert position.y() >= 0
+        assert position.y() + window.results_button.height() <= window.controls_scroll.viewport().height()
+        assert window.grab().save(str(tmp_path / f"actions-{mode}-{size[0]}.png"))
+        assert window.camera is None
+    finally:
+        application.setStyleSheet(original_stylesheet)
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+@pytest.mark.parametrize("size", [(1024, 768), (1513, 900)])
+def test_toolbar_polish_fits_both_themes_and_preserves_menus(window, application, tmp_path, mode, size):
+    original_stylesheet = application.styleSheet()
+    try:
+        desktop._apply_display_mode(mode)
+        window.resize(*size)
+        window.recipe_summary.setText("Coil family / Long specimen inspection recipe / revision 2026-10-27")
+        window.show()
+        window.activateWindow()
+        application.processEvents()
+        controls = [window.specimen, window.details_button, window.basic_settings_button]
+        assert {control.height() for control in controls} == {36}
+        for control in [*controls, window.connect_button, window.disconnect_button, window.recipe_summary]:
+            assert control.isVisible()
+            top_left = control.mapTo(window, desktop.QPointF(0, 0).toPoint())
+            assert top_left.x() >= 0
+            assert top_left.x() + control.width() <= window.width()
+        assert window.specimen.mapToGlobal(desktop.QPointF(0, 0).toPoint()).y() == controls[-1].mapToGlobal(
+            desktop.QPointF(0, 0).toPoint()
+        ).y()
+        capture = tmp_path / f"toolbar-{mode}-{size[0]}.png"
+        assert window.grab().save(str(capture))
+        print(f"Toolbar capture: {capture}")
+        for menu in (window.diagnostics_menu, window.inspection_menu):
+            menu.popup(window.menuBar().mapToGlobal(window.menuBar().actionGeometry(menu.menuAction()).bottomLeft()))
+            application.processEvents()
+            assert menu.isVisible()
+            assert all(action.text() for action in menu.actions())
+            assert menu.grab().save(str(tmp_path / f"{menu.title()}-{mode}.png"))
+            menu.hide()
+        assert window.camera is None
+    finally:
+        application.setStyleSheet(original_stylesheet)
+
+
+def test_basic_settings_visible_switches_and_restores_display_mode(window, tmp_path, monkeypatch):
+    preferences = QSettings(str(tmp_path / "preferences.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(desktop, "QSettings", lambda *args: preferences)
+    application = QApplication.instance()
+    original_stylesheet = application.styleSheet()
+    selections = []
+
+    def inspect_dialog(dialog):
+        assert dialog.windowTitle() == "Basic settings"
+        picker = dialog.findChild(desktop.QComboBox)
+        selections.append(picker.currentText())
+        picker.setCurrentText("Dark")
+        picker.setCurrentText("Light")
+        assert preferences.value("display_mode") == "light"
+        assert "#F4F5F7" in application.styleSheet()
+        window.grab().save(str(tmp_path / "settings-light.png"))
+        picker.setCurrentText("Dark")
+        assert preferences.value("display_mode") == "dark"
+        assert "#F4F5F7" not in application.styleSheet()
+        window.grab().save(str(tmp_path / "settings-dark.png"))
+        preferences.setValue("display_mode", "light")
+        return 0
+
+    monkeypatch.setattr(QDialog, "exec", inspect_dialog)
+    try:
+        window.resize(1024, 768)
+        window.show()
+        application.processEvents()
+        assert window.basic_settings_button.isVisible()
+        assert window.basic_settings_button.text() == "Settings"
+        window._basic_settings()
+        window._basic_settings()
+        assert selections == ["Dark", "Light"]
+        assert window.camera is None
+    finally:
+        application.setStyleSheet(original_stylesheet)
 
 
 @pytest.fixture
@@ -555,7 +701,8 @@ def application():
 
 
 @pytest.fixture
-def window(application):
+def window(application, monkeypatch, tmp_path):
+    monkeypatch.setattr(desktop, "INSPECTION_DIRECTORY", tmp_path / "inspection-results")
     instance = desktop.MainWindow()
     instance.specimen.setText("PCB-TEST-001")
     yield instance
@@ -1350,6 +1497,7 @@ def region_dialog(window, application):
     image = QImage(640, 480, QImage.Format.Format_RGB888)
     image.fill(QColor("#505861"))
     dialog = desktop.ReplaySettings(window.recipe, window, camera_image=image, specimen_id="PCB-SAVED-001")
+    dialog.recipe_name.setText("PCB standard bending")
     dialog.recognition_mode.setCurrentIndex(1)
     dialog.show()
     application.processEvents()
@@ -1379,6 +1527,7 @@ def test_actual_mark_setup_captures_and_restores_references(window, application,
     source = cv2.imread(str(Path(__file__).parents[1] / "fixtures" / "pink-marks-reference.png"))
     image = QImage(source.data, 200, 185, source.strides[0], QImage.Format.Format_BGR888).copy()
     dialog = desktop.ReplaySettings(window.recipe, window, camera_image=image, specimen_id="coil-01")
+    dialog.recipe_name.setText("Coil standard bending")
     assert dialog.recognition_mode.currentIndex() == 0
     for inputs, values in zip(
         dialog._regions,
@@ -1400,7 +1549,7 @@ def test_actual_mark_setup_captures_and_restores_references(window, application,
     restored = desktop.ReplaySettings(window.recipe, window, camera_image=absent, specimen_id="other")
     monkeypatch.setattr(desktop.QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
     restored.load_recipe_button.click()
-    assert restored.specimen_id == "coil-01"
+    assert restored.specimen_id == "other"
     assert restored.recognition_mode.currentIndex() == 0
     assert restored._candidate_recipe(require_confirmation=False) == candidate
     assert not restored._confirmed.isChecked()
@@ -1408,6 +1557,7 @@ def test_actual_mark_setup_captures_and_restores_references(window, application,
     dialog._confirmed.setChecked(True)
     dialog.resize(*size)
     dialog.show()
+    dialog.setup_tabs.setCurrentIndex(1)
     application.processEvents()
     assert dialog.store_recipe_button.isVisible() and dialog.save_button.isEnabled()
     assert dialog.rect().contains(dialog._error.geometry())
@@ -1427,15 +1577,18 @@ def test_recipe_save_and_load_in_fresh_setup(region_dialog, window, monkeypatch,
     path = tmp_path / "PCB-recipe.json"
     monkeypatch.setattr(desktop.QFileDialog, "getSaveFileName", lambda *args: (str(path), ""))
     dialog.store_recipe_button.click()
-    assert load_recipe(path) == StoredRecipe("PCB-SAVED-001", expected, 640, 480)
+    saved = load_recipe(path)
+    assert saved.specimen_id == "PCB-SAVED-001"
+    assert saved.recipe == expected
+    assert saved.profile.name == "PCB standard bending"
     assert "Recipe saved:" in dialog.recipe_file.text()
     assert dialog.result() != QDialog.DialogCode.Accepted
     assert window.camera is None and window.run_record is None
     fresh = desktop.ReplaySettings(window.recipe, window, camera_image=dialog.preview._image, specimen_id="OTHER")
     monkeypatch.setattr(desktop.QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
     fresh.load_recipe_button.click()
-    assert fresh.specimen_id == "PCB-SAVED-001"
-    assert "PCB-SAVED-001" in fresh.recipe_identity.text()
+    assert fresh.specimen_id == "OTHER"
+    assert "OTHER" in fresh.recipe_identity.text()
     assert fresh._candidate_recipe(require_confirmation=False) == expected
     assert fresh.preview.regions == (expected.marker, expected.position)
     assert not fresh._confirmed.isChecked()
@@ -1489,10 +1642,10 @@ def test_recipe_save_error_is_visible_and_does_not_close_setup(region_dialog, mo
     draw_region_pair(dialog)
     monkeypatch.setattr(desktop.QFileDialog, "getSaveFileName", lambda *args: (str(tmp_path / "recipe.json"), ""))
 
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise OSError("Disk unavailable")
 
-    monkeypatch.setattr(desktop, "save_recipe", fail)
+    monkeypatch.setattr(desktop, "save_managed_recipe", fail)
     dialog.store_recipe_button.click()
     assert "Recipe not saved: Disk unavailable" in dialog._error.text()
     assert dialog._recipe_path is None
@@ -1523,17 +1676,17 @@ def test_loaded_recipe_starts_only_after_start_and_confirmation(window, camera_s
     window.load_recipe_button.click()
     assert window.camera.trial is None
     assert window.run_record is None
-    assert window.specimen.text() == "PCB-LOADED-005"
+    assert window.specimen.text() == "PCB-TEST-001"
     window.trial_button.click()
     if accepted:
         assert window.camera.trial.recipe == recipe
-        assert window.run_record.specimen_id == "PCB-LOADED-005"
-        assert window.specimen.text() == "PCB-LOADED-005"
+        assert window.run_record.specimen_id == "PCB-TEST-001"
+        assert window.specimen.text() == "PCB-TEST-001"
         assert not window.specimen.isEnabled()
     else:
         assert window.camera.trial is None
         assert window.run_record is None
-        assert window.specimen.text() == "PCB-LOADED-005"
+        assert window.specimen.text() == "PCB-TEST-001"
 
 
 @pytest.mark.parametrize("connected", [False, True])
@@ -1558,7 +1711,7 @@ def test_load_recipe_opens_without_specimen_and_does_not_start(window, camera_st
     assert "Start marker:" in window.run_label.toolTip()
     assert "Position marker:" in window.run_label.toolTip()
     assert window._camera_recipe == recipe
-    assert window.specimen.text() == "PCB-LOADED-005"
+    assert window.specimen.text() == ""
     assert window.camera.trial is None if connected else window.camera is None
     assert window.run_record is None
     assert window.lifecycle.snapshot.state == RunState.STOPPED
@@ -1573,7 +1726,7 @@ def test_cancelling_recipe_picker_preserves_selection(window, monkeypatch, tmp_p
     monkeypatch.setattr(desktop.QFileDialog, "getOpenFileName", lambda *args: ("", ""))
     window.load_recipe_button.click()
     assert window._camera_recipe == recipe
-    assert window.specimen.text() == "PCB-LOADED-005"
+    assert window.specimen.text() == "PCB-TEST-001"
     assert window.run_record is None
 
 
@@ -1632,7 +1785,7 @@ def test_bound_recipe_preserves_precise_regions_on_confirmation(region_dialog, t
     dialog._confirmed.setChecked(True)
     assert dialog._candidate_recipe(require_confirmation=True) == stored.recipe
     assert "Threshold 0.500" in dialog.recipe_file.toolTip()
-    assert not dialog.store_recipe_button.isEnabled()
+    assert dialog.store_recipe_button.isEnabled()
 
 
 def test_missing_bundled_model_rejects_recipe_without_replacing_selection(window, monkeypatch, tmp_path):
@@ -1794,6 +1947,7 @@ def test_live_cycle_recipe_counts_inspections_and_preserves_defects(window, came
 
 def test_training_export_can_be_saved_as_a_model_bound_recipe(candidate_dialog, monkeypatch, tmp_path):
     dialog = candidate_dialog
+    dialog.family_name.setText("A-type standard bending")
     from rdt_monitor.recipes import load_recipe
 
     finish_candidate_review(dialog)
@@ -1820,6 +1974,7 @@ def test_training_export_can_be_saved_as_a_model_bound_recipe(candidate_dialog, 
 
 def test_invalid_review_band_is_reported_without_saving(candidate_dialog, monkeypatch, tmp_path):
     dialog = candidate_dialog
+    dialog.family_name.setText("A-type standard bending")
     finish_candidate_review(dialog)
     model = tmp_path / "model.xml"
     model.write_bytes(b"model")
@@ -2064,6 +2219,7 @@ def test_overlap_priority_and_clear_selected_only(region_dialog):
 def test_coordinate_sync_and_edits_require_fresh_confirmation(region_dialog):
     dialog = region_dialog
     draw_region_pair(dialog)
+    dialog.setup_tabs.setCurrentIndex(1)
     dialog.advanced_button.click()
     assert dialog._coordinate_panel.isVisible()
     dialog._confirmed.setChecked(True)
@@ -2141,6 +2297,7 @@ def test_graphical_editor_native_render(region_dialog, application, tmp_path, si
     assert dialog.preview.width() >= 400
     assert dialog.preview.height() >= 260
     assert dialog.grab().save(str(tmp_path / f"region-editor-{size[0]}x{size[1]}.png"))
+    dialog.setup_tabs.setCurrentIndex(1)
     dialog.advanced_button.click()
     dialog._confirmed.setChecked(True)
     application.processEvents()
@@ -2163,7 +2320,9 @@ def test_graphical_editor_native_render(region_dialog, application, tmp_path, si
 def test_live_settings_require_regions_and_confirmation(window, camera_stub):
     window.connect_camera()
     window.poll()
-    dialog = desktop.ReplaySettings(window.recipe, window, camera_image=window.live_view._image)
+    dialog = desktop.ReplaySettings(
+        window.recipe, window, camera_image=window.live_view._image, specimen_id=window.specimen.text()
+    )
     dialog.recognition_mode.setCurrentIndex(1)
     assert all(spin.value() == 0 for inputs in dialog._regions for spin in inputs)
     original = dialog.recipe

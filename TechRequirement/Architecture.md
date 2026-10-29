@@ -4,6 +4,11 @@ Status: agreed design baseline, 2026-10-14. This document specifies intended
 behavior, not an implemented or qualified system. Visual requirements are in
 [design direction.md](design%20direction.md).
 
+The [rollout plan](Rollout%20Plan.md), recorded 2026-10-19, retains vision markers
+for the Phase 1 pilot and defers read-only IPC/controller cycle and position
+feedback integration to Phase 2. It does not authorize machine control or waive
+the qualification gates below.
+
 ## 1. Scope And Authority
 
 - Standalone, offline Windows application for one camera and one test station.

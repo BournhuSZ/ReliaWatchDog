@@ -10,6 +10,7 @@ import { useActivePipelineStatus } from '../main-content/hooks/use-active-pipeli
 import { AnomalyMap } from './anomaly-map/anomaly-map.component';
 import { InferenceDevices } from './inference-devices/inference-devices.component';
 import { PipelineConfiguration } from './pipeline-configuration.component';
+import { ToolbarSettings } from './toolbar-settings.component';
 import { TogglePipelineButton } from './toggle-pipeline-button/toggle-pipeline-button.component';
 
 export const Toolbar = () => {
@@ -42,6 +43,7 @@ export const Toolbar = () => {
                 <Flex gap={'size-200'}>
                     {!hideTogglePipeline && canEnablePipeline && <TogglePipelineButton />}
                     <PipelineConfiguration />
+                    <ToolbarSettings />
                 </Flex>
             </Flex>
         </View>

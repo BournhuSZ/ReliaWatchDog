@@ -17,7 +17,18 @@ from uuid import uuid4
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import QPointF, QProcess, QProcessEnvironment, QRectF, QSignalBlocker, Qt, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import (
+    QPointF,
+    QProcess,
+    QProcessEnvironment,
+    QRectF,
+    QSettings,
+    QSignalBlocker,
+    Qt,
+    QTimer,
+    QUrl,
+    pyqtSignal,
+)
 from PyQt6.QtGui import (
     QCloseEvent,
     QColor,
@@ -30,6 +41,7 @@ from PyQt6.QtGui import (
     QPainterPath,
     QPaintEvent,
     QPen,
+    QResizeEvent,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -83,7 +95,16 @@ from rdt_monitor.detection import (
 from rdt_monitor.domain import InspectionRecord, RunRecord, SyncConfig, SyncResult, SyncState
 from rdt_monitor.lifecycle import CycleTicket, InspectionOutcome, Readiness, RunLifecycle, RunMode, RunState
 from rdt_monitor.live import LiveInspection
-from rdt_monitor.recipes import StoredRecipe, load_recipe, save_inspection_recipe, save_recipe
+from rdt_monitor.recipes import (
+    RecipeProfile,
+    SpecimenDetails,
+    StoredRecipe,
+    load_recipe,
+    save_inspection_recipe,
+    save_managed_recipe,
+    save_run_setup,
+    specimen_setup,
+)
 from rdt_monitor.replay import (
     Image,
     MarkerAppearance,
@@ -524,6 +545,7 @@ class ReplaySettings(QDialog):
         self.setWindowTitle("Cycle synchronization setup" if camera_image is not None else "Replay settings")
         self.recipe = recipe
         self.specimen_id = specimen_id
+        self.run_setup: StoredRecipe | None = None
         self._recipe_path: Path | None = None
         self._stored_recipe: tuple[StoredRecipe, Path] | None = None
         self._loaded_references: tuple[MarkerAppearance, MarkerAppearance] | None = None
@@ -577,6 +599,62 @@ class ReplaySettings(QDialog):
             self.recipe_identity.setTextFormat(Qt.TextFormat.PlainText)
             self.recipe_identity.setWordWrap(True)
             settings_layout.addWidget(self.recipe_identity)
+            self.setup_tabs = QTabWidget()
+            settings_layout.addWidget(self.setup_tabs)
+            basic, advanced = QWidget(), QWidget()
+            self.setup_tabs.addTab(basic, "Basic")
+            self.setup_tabs.addTab(advanced, "Advanced")
+            settings_layout = QVBoxLayout(basic)
+            self._advanced_layout = QVBoxLayout(advanced)
+            self.advanced_panel = QWidget()
+            advanced_scroll = QScrollArea()
+            advanced_scroll.setWidgetResizable(True)
+            advanced_scroll.setFrameShape(QFrame.Shape.NoFrame)
+            advanced_scroll.setWidget(self.advanced_panel)
+            self._advanced_layout.addWidget(advanced_scroll)
+            self.advanced_layout = QVBoxLayout(self.advanced_panel)
+            identity_form = QFormLayout()
+            self.specimen_input = QLineEdit(specimen_id)
+            self.specimen_input.setMaxLength(128)
+            self.specimen_name, self.specimen_batch = QLineEdit(), QLineEdit()
+            self.specimen_name.setMaxLength(128)
+            self.specimen_batch.setMaxLength(128)
+            identity_form.addRow("Specimen serial", self.specimen_input)
+            identity_form.addRow("Name (optional)", self.specimen_name)
+            identity_form.addRow("Batch (optional)", self.specimen_batch)
+            settings_layout.addLayout(identity_form)
+            self.specimen_input.textChanged.connect(self._identity_changed)
+            self.specimen_name.textChanged.connect(self._settings_changed)
+            self.specimen_batch.textChanged.connect(self._settings_changed)
+            self.purpose_label = QLabel("Choose a named recipe, then check this specimen's setup.")
+            self.purpose_label.setWordWrap(True)
+            self.purpose_label.setTextFormat(Qt.TextFormat.PlainText)
+            settings_layout.addWidget(self.purpose_label)
+            metadata = QFormLayout()
+            self.recipe_name = QLineEdit()
+            self.recipe_name.setMaxLength(128)
+            self.recipe_name.setPlaceholderText("e.g. A-type standard bending")
+            self.recipe_notes = QPlainTextEdit()
+            self.recipe_notes.setMaximumHeight(80)
+            metadata.addRow("Recipe name", self.recipe_name)
+            metadata.addRow("Purpose notes", self.recipe_notes)
+            self.advanced_layout.addLayout(metadata)
+            self.detector_description = QLabel("No detector selected. Use Collect and train to bind a trained model.")
+            self.detector_description.setTextFormat(Qt.TextFormat.PlainText)
+            self.detector_description.setWordWrap(True)
+            self.advanced_layout.addWidget(self.detector_description)
+            decisions = QFormLayout()
+            self.detector_threshold, self.detector_margin = QDoubleSpinBox(), QDoubleSpinBox()
+            self._decision_baseline = (0.5, 0.05)
+            self.detector_threshold.setRange(0.001, 0.999)
+            self.detector_margin.setRange(0, 0.5)
+            for spin, value in ((self.detector_threshold, 0.5), (self.detector_margin, 0.05)):
+                spin.setDecimals(3)
+                spin.setValue(value)
+                spin.setEnabled(False)
+            decisions.addRow("Threshold", self.detector_threshold)
+            decisions.addRow("Review margin", self.detector_margin)
+            self.advanced_layout.addLayout(decisions)
             recipe_controls = QHBoxLayout()
             self.load_recipe_button = QPushButton("Load recipe")
             self.load_recipe_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton))
@@ -587,12 +665,21 @@ class ReplaySettings(QDialog):
             self.store_recipe_button.setToolTip("Save specimen and synchronization settings to JSON")
             self.store_recipe_button.clicked.connect(self._store_recipe)
             recipe_controls.addWidget(self.load_recipe_button)
-            recipe_controls.addWidget(self.store_recipe_button)
+            self.advanced_layout.addWidget(self.store_recipe_button)
             settings_layout.addLayout(recipe_controls)
             self.recipe_file = QLabel("Recipe: unsaved")
             self.recipe_file.setTextFormat(Qt.TextFormat.PlainText)
             self.recipe_file.setWordWrap(True)
             settings_layout.addWidget(self.recipe_file)
+            self.refresh_reference_button = QPushButton("Use current marker appearance")
+            self.refresh_reference_button.clicked.connect(self._refresh_marker_references)
+            settings_layout.addWidget(self.refresh_reference_button)
+            instruction = QLabel(
+                "Check both markers and the cyan inspection ROI after every remount. "
+                "Marker adjustment does not align the inspected surface. Exercise test cycles before monitoring."
+            )
+            instruction.setWordWrap(True)
+            settings_layout.addWidget(instruction)
         self._coordinate_panel = QWidget()
         coordinate_form = QFormLayout(self._coordinate_panel)
         coordinate_form.setContentsMargins(0, 0, 0, 0)
@@ -650,7 +737,8 @@ class ReplaySettings(QDialog):
         self._timeout.setSuffix(" s")
         self._timeout.setValue(recipe.synchronization.cycle_timeout_seconds)
         form.addRow("Cycle-start timeout", self._timeout)
-        settings_layout.addLayout(form)
+        technical_layout = self.advanced_layout if self.preview is not None else settings_layout
+        technical_layout.addLayout(form)
         if self.preview is not None:
             self.advanced_button = QToolButton()
             self.advanced_button.setText("Advanced coordinates")
@@ -658,13 +746,13 @@ class ReplaySettings(QDialog):
             self.advanced_button.setArrowType(Qt.ArrowType.RightArrow)
             self.advanced_button.setCheckable(True)
             self.advanced_button.toggled.connect(self._toggle_coordinates)
-            settings_layout.addWidget(self.advanced_button)
-            settings_layout.addWidget(self._coordinate_panel)
+            technical_layout.addWidget(self.advanced_button)
+            technical_layout.addWidget(self._coordinate_panel)
             self._coordinate_panel.hide()
             settings_layout.addStretch()
             self.preview.regionChanged.connect(self._canvas_changed)
             self.preview.selectionChanged.connect(self._select_role)
-            self._confirmed = QCheckBox("Regions and timing confirmed / defect inspection remains unavailable")
+            self._confirmed = QCheckBox("Setup and test cycles checked / counting only")
             self._confirmed.toggled.connect(self._validate)
             layout.addWidget(self._confirmed)
         self._error = QLabel("")
@@ -677,7 +765,7 @@ class ReplaySettings(QDialog):
         buttons.rejected.connect(self.reject)
         self.save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
         if self.preview is not None:
-            self.save_button.setText("Start synchronization")
+            self.save_button.setText("Use for this run")
         layout.addWidget(buttons)
         for inputs in self._regions:
             for spin in inputs:
@@ -689,6 +777,15 @@ class ReplaySettings(QDialog):
             self._brightness.setEnabled(False)
         if self.preview is not None:
             self._validate()
+
+    def _identity_changed(self) -> None:
+        self.specimen_id = self.specimen_input.text().strip()
+        self.recipe_identity.setText(f"Specimen: {self.specimen_id or '-'}")
+        self._settings_changed()
+
+    def _refresh_marker_references(self) -> None:
+        self._loaded_references = None
+        self._settings_changed()
 
     def _toggle_coordinates(self, expanded: bool) -> None:
         self._coordinate_panel.setVisible(expanded)
@@ -703,30 +800,73 @@ class ReplaySettings(QDialog):
         self.clear_region_button.setEnabled(self.preview.regions[role] is not None)
 
     def _store_recipe(self) -> None:
+        if self.preview is None or self._confirmed is None:
+            self._error.setText("Reusable recipes require camera setup")
+            return
         try:
+            original = self._stored_recipe[0] if self._stored_recipe is not None else None
+            detector = original.detector if original is not None else None
+            if detector is not None:
+                detector = replace(
+                    detector,
+                    threshold=(
+                        detector.threshold
+                        if self.detector_threshold.value() == self._decision_baseline[0]
+                        else self.detector_threshold.value()
+                    ),
+                    review_margin=(
+                        detector.review_margin
+                        if self.detector_margin.value() == self._decision_baseline[1]
+                        else self.detector_margin.value()
+                    ),
+                )
+            profile = RecipeProfile(
+                original.profile.family_id if original is not None and original.profile is not None else uuid4().hex,
+                uuid4().hex,
+                self.recipe_name.text().strip(),
+                self.recipe_notes.toPlainText().strip(),
+            )
             stored = StoredRecipe(
                 self.specimen_id.strip(),
                 self._candidate_recipe(require_confirmation=False),
                 self.preview._image.width(),
                 self.preview._image.height(),
+                detector,
+                profile,
+                SpecimenDetails(self.specimen_name.text().strip(), self.specimen_batch.text().strip()),
             )
-        except ValueError as error:
+        except (OSError, ValueError) as error:
             self._error.setText(str(error))
             return
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Save synchronization recipe",
+            "Save new recipe revision (original is preserved)",
             str(RECIPE_DIRECTORY / "synchronization-recipe.json"),
             "JSON recipe (*.json)",
         )
         if not path:
             return
         try:
-            save_recipe(Path(path), stored)
+            save_managed_recipe(
+                Path(path),
+                stored,
+                source=self._stored_recipe[1] if self._stored_recipe is not None else None,
+            )
         except (OSError, ValueError) as error:
             self._error.setText(f"Recipe not saved: {error}")
             return
         self._recipe_path = Path(path)
+        self._stored_recipe = (stored, self._recipe_path)
+        self._decision_baseline = (self.detector_threshold.value(), self.detector_margin.value())
+        self.recipe = stored.recipe
+        self._loaded_references = (
+            (stored.recipe.marker_appearance, stored.recipe.position_appearance)
+            if stored.recipe.marker_appearance is not None and stored.recipe.position_appearance is not None
+            else None
+        )
+        self._reference_geometry = (stored.recipe.marker, stored.recipe.position)
+        self.purpose_label.setText(f"{profile.name}\n{profile.notes}\n{stored.mode_label}")
+        self._confirmed.setChecked(False)
         self.recipe_file.setText(f"Recipe saved: {self._recipe_path.name}")
         self.recipe_file.setToolTip(path)
         self._error.clear()
@@ -745,6 +885,9 @@ class ReplaySettings(QDialog):
         self._apply_stored_recipe(stored, Path(path))
 
     def _apply_stored_recipe(self, stored: StoredRecipe, path: Path) -> bool:
+        if self.preview is None or self.recognition_mode is None or self._confirmed is None:
+            self._error.setText("Recipe loading requires camera setup")
+            return False
         try:
             if (stored.image_width, stored.image_height) != (self.preview._image.width(), self.preview._image.height()):
                 raise ValueError("Recipe image dimensions differ from this camera frame; configure new regions")
@@ -761,8 +904,26 @@ class ReplaySettings(QDialog):
             self._error.setText(f"Recipe not loaded: {error}")
             return False
         self.recipe = settings
-        self.specimen_id = stored.specimen_id
         self.recipe_identity.setText(f"Specimen: {self.specimen_id}")
+        self.specimen_name.setText(stored.specimen.name)
+        self.specimen_batch.setText(stored.specimen.batch)
+        self.recipe_name.setText(stored.profile.name if stored.profile is not None else path.stem)
+        self.recipe_notes.setPlainText(stored.profile.notes if stored.profile is not None else "")
+        self.purpose_label.setText(f"{self.recipe_name.text()}\n{self.recipe_notes.toPlainText()}\n{stored.mode_label}")
+        self.preview.inspection_region = stored.detector.region if stored.detector is not None else None
+        if stored.detector is not None:
+            self.detector_description.setText(
+                f"Model SHA-256: {stored.detector.model_sha256}\n"
+                f"Training ROI: {stored.detector.region}\n"
+                "Model/ROI changes require a newly trained and validated family recipe."
+            )
+            self.detector_threshold.setValue(stored.detector.threshold)
+            self.detector_margin.setValue(stored.detector.review_margin)
+        else:
+            self.detector_description.setText("Counting only. Use Collect and train to bind a trained model.")
+        self.detector_threshold.setEnabled(stored.detector is not None)
+        self.detector_margin.setEnabled(stored.detector is not None)
+        self._decision_baseline = (self.detector_threshold.value(), self.detector_margin.value())
         for inputs, region in zip(self._regions, (settings.marker, settings.position), strict=True):
             for spin, value in zip(inputs, (region.left, region.top, region.width, region.height), strict=True):
                 with QSignalBlocker(spin):
@@ -775,10 +936,11 @@ class ReplaySettings(QDialog):
         self._brightness.setEnabled(settings.marker_appearance is None)
         self._loaded_references = (
             (settings.marker_appearance, settings.position_appearance)
-            if settings.marker_appearance is not None
+            if settings.marker_appearance is not None and settings.position_appearance is not None
             else None
         )
-        self._reference_geometry = tuple(Region(*(spin.value() / 100 for spin in inputs)) for inputs in self._regions)
+        geometry = [Region(*(spin.value() / 100 for spin in inputs)) for inputs in self._regions]
+        self._reference_geometry = (geometry[0], geometry[1])
         self._confirmed.setChecked(False)
         self._preview_regions()
         self._validate()
@@ -787,14 +949,14 @@ class ReplaySettings(QDialog):
         self.recipe_file.setText(f"Recipe loaded: {self._recipe_path.name} | {stored.mode_label}")
         self.recipe_file.setToolTip(stored.description(path))
         bound = stored.detector is not None
-        self.store_recipe_button.setEnabled(not bound)
+        self.store_recipe_button.setEnabled(True)
         if self._confirmed is not None:
             self._confirmed.setText(
-                "Regions and timing confirmed / UNQUALIFIED live inspection"
+                "Markers, inspection crop and test cycles checked / UNQUALIFIED"
                 if bound
-                else "Regions and timing confirmed / defect inspection remains unavailable"
+                else "Setup and test cycles checked / counting only"
             )
-        self.save_button.setText("Start unqualified inspection" if bound else "Start synchronization")
+        self.save_button.setText("Use for this run")
         return True
 
     def _canvas_changed(self, role: int, region: Region | None) -> None:
@@ -861,6 +1023,8 @@ class ReplaySettings(QDialog):
             position_appearance=None,
         )
         if self.recognition_mode is not None and self.recognition_mode.currentIndex() == 0:
+            if self.preview is None:
+                raise ValueError("Marker appearance requires a camera setup frame")
             if self._loaded_references is not None and tuple(regions) == self._reference_geometry:
                 marker_reference, position_reference = self._loaded_references
             else:
@@ -876,7 +1040,7 @@ class ReplaySettings(QDialog):
     def _validate(self) -> None:
         try:
             self._candidate_recipe(require_confirmation=False)
-        except ValueError as error:
+        except (OSError, ValueError) as error:
             self._error.setText(str(error))
             self.save_button.setEnabled(False)
             if self._confirmed is not None:
@@ -886,18 +1050,44 @@ class ReplaySettings(QDialog):
             self._error.clear()
             if self._confirmed is not None:
                 self._confirmed.setEnabled(True)
-                self.store_recipe_button.setEnabled(
-                    bool(self.specimen_id.strip())
-                    and (self._stored_recipe is None or self._stored_recipe[0].detector is None)
-                )
-            self.save_button.setEnabled(self._confirmed is None or self._confirmed.isChecked())
+                self.store_recipe_button.setEnabled(bool(self.specimen_id.strip()))
+            self.save_button.setEnabled(
+                self._confirmed is None or (self._confirmed.isChecked() and bool(self.specimen_id.strip()))
+            )
 
     def _save(self) -> None:
         try:
-            self.recipe = self._candidate_recipe(require_confirmation=True)
-        except ValueError as error:
+            candidate = self._candidate_recipe(require_confirmation=True)
+            if self.preview is not None:
+                details = SpecimenDetails(self.specimen_name.text().strip(), self.specimen_batch.text().strip())
+                if self._stored_recipe is not None:
+                    original = self._stored_recipe[0]
+                    if original.detector is not None and (
+                        (self.detector_threshold.value(), self.detector_margin.value()) != self._decision_baseline
+                    ):
+                        raise ValueError("Save a new recipe revision before using changed decision settings")
+                    original_name = (
+                        original.profile.name if original.profile is not None else self._stored_recipe[1].stem
+                    )
+                    original_notes = original.profile.notes if original.profile is not None else ""
+                    if (
+                        self.recipe_name.text().strip() != original_name
+                        or self.recipe_notes.toPlainText().strip() != original_notes
+                    ):
+                        raise ValueError("Save a new recipe revision or discard the changed name/purpose notes")
+                    self.run_setup = specimen_setup(original, self.specimen_id, candidate, details)
+                else:
+                    self.run_setup = StoredRecipe(
+                        self.specimen_id,
+                        candidate,
+                        self.preview._image.width(),
+                        self.preview._image.height(),
+                        specimen=details,
+                    )
+        except (OSError, ValueError) as error:
             self._error.setText(str(error))
             return
+        self.recipe = candidate
         self.accept()
 
 
@@ -1408,6 +1598,13 @@ class TrainingCollectionDialog(QDialog):
         self.live_review_margin.setAccessibleName("Live inspection review margin")
         self.live_review_margin.setToolTip("Inclusive needs-review half-band around the threshold; not confidence")
         threshold_form = QFormLayout()
+        self.family_name = QLineEdit()
+        self.family_name.setMaxLength(128)
+        self.family_name.setPlaceholderText("e.g. A-type standard bending")
+        self.family_notes = QLineEdit()
+        self.family_notes.setMaxLength(2000)
+        threshold_form.addRow("Recipe name", self.family_name)
+        threshold_form.addRow("Purpose notes", self.family_notes)
         threshold_form.addRow("Unqualified threshold", self.live_threshold)
         threshold_form.addRow("Review margin", self.live_review_margin)
         training_side.addLayout(threshold_form)
@@ -1924,9 +2121,15 @@ class TrainingCollectionDialog(QDialog):
             )
             if not target:
                 return
+            profile = RecipeProfile(
+                stored.profile.family_id if stored.profile is not None else uuid4().hex,
+                uuid4().hex,
+                self.family_name.text().strip(),
+                self.family_notes.text().strip(),
+            )
             save_inspection_recipe(
                 Path(target),
-                replace(stored, specimen_id=settings.specimen_id),
+                replace(stored, specimen_id=settings.specimen_id, profile=profile),
                 self._export,
                 settings.region,
                 self.live_threshold.value(),
@@ -2000,8 +2203,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         RECIPE_DIRECTORY.mkdir(parents=True, exist_ok=True)
         self.setWindowTitle("RDT Reliability Monitor")
-        self.resize(1280, 840)
-        self.setMinimumSize(1024, 768)
+        self.resize(1440, 900)
+        self.setMinimumSize(960, 640)
         self.recipe = fixture_recipe()
         self.pipeline: ReplayPipeline | None = None
         self.camera: CameraPreview | None = None
@@ -2034,9 +2237,13 @@ class MainWindow(QMainWindow):
         central.setObjectName("monitorSurface")
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setContentsMargins(16, 10, 16, 14)
         layout.setSpacing(12)
-        heading = QHBoxLayout()
+        header = QWidget()
+        header.setObjectName("monitorHeader")
+        heading = QHBoxLayout(header)
+        heading.setContentsMargins(0, 0, 0, 4)
+        heading.setSpacing(12)
         title = QLabel("RDT RELIABILITY MONITOR")
         title.setObjectName("title")
         heading.addWidget(title)
@@ -2057,18 +2264,34 @@ class MainWindow(QMainWindow):
         self.specimen.setPlaceholderText("Specimen ID")
         self.specimen.setMaxLength(128)
         self.specimen.setMaximumWidth(170)
+        self.specimen.setFixedHeight(36)
         heading.addWidget(self.specimen)
         self.details_button = QPushButton("Details")
         self.details_button.setCheckable(True)
         self.details_button.setAccessibleName("Show technical details")
+        self.details_button.setToolTip("Show or hide technical details")
+        self.details_button.setFixedHeight(36)
+        utility_divider = QFrame()
+        utility_divider.setObjectName("toolbarDivider")
+        utility_divider.setFixedSize(1, 24)
+        heading.addWidget(utility_divider)
         heading.addWidget(self.details_button)
-        layout.addLayout(heading)
+        self.basic_settings_button = self._button(
+            "Settings", QStyle.StandardPixmap.SP_FileDialogDetailedView, self._basic_settings
+        )
+        self.basic_settings_button.setToolTip("Basic settings")
+        self.basic_settings_button.setFixedHeight(36)
+        heading.addWidget(self.basic_settings_button)
+        layout.addWidget(header)
         self.load_recipe_button = self._button(
             "Load recipe", QStyle.StandardPixmap.SP_DialogOpenButton, self.load_marker_recipe
         )
         self.load_recipe_button.setToolTip("Load a stored synchronization recipe for review and confirmation")
         self.load_recipe_button.setEnabled(True)
-        camera_bar = QHBoxLayout()
+        camera_toolbar = QWidget()
+        camera_toolbar.setObjectName("cameraToolbar")
+        camera_bar = QHBoxLayout(camera_toolbar)
+        camera_bar.setContentsMargins(0, 0, 0, 0)
         camera_bar.setSpacing(8)
         self.camera_index = QSpinBox()
         self.camera_index.setRange(0, 99)
@@ -2081,13 +2304,22 @@ class MainWindow(QMainWindow):
             self.disconnect_camera,
         )
         self.disconnect_button.setEnabled(False)
+        self.connect_button.setFixedHeight(36)
+        self.disconnect_button.setFixedHeight(36)
         camera_bar.addWidget(self.connect_button)
         camera_bar.addWidget(self.disconnect_button)
-        camera_bar.addStretch()
+        recipe_divider = QFrame()
+        recipe_divider.setObjectName("toolbarDivider")
+        recipe_divider.setFixedSize(1, 24)
+        camera_bar.addSpacing(4)
+        camera_bar.addWidget(recipe_divider)
+        camera_bar.addSpacing(4)
         self.recipe_summary = QLabel("No recipe loaded")
         self.recipe_summary.setObjectName("caption")
         self.recipe_summary.setTextFormat(Qt.TextFormat.PlainText)
         self.recipe_summary.setWordWrap(True)
+        self.recipe_summary.setMinimumWidth(0)
+        self.recipe_summary.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         camera_bar.addWidget(self.recipe_summary, 1)
         self.trial_button = self._button("Start", QStyle.StandardPixmap.SP_MediaPlay, self.start_marker_trial)
         self.trial_button.setToolTip(
@@ -2104,7 +2336,7 @@ class MainWindow(QMainWindow):
         self.camera_details = QLabel("Camera disconnected")
         self.camera_details.setWordWrap(True)
         self.camera_details.setObjectName("caption")
-        layout.addLayout(camera_bar)
+        layout.addWidget(camera_toolbar)
         self.source_label = QLabel("Source: none")
         self.source_label.setWordWrap(True)
         self.source_label.setTextFormat(Qt.TextFormat.PlainText)
@@ -2114,7 +2346,10 @@ class MainWindow(QMainWindow):
         self.source_label.setObjectName("caption")
         self.run_label.setObjectName("caption")
         vertical = QSplitter(Qt.Orientation.Vertical)
+        vertical.setHandleWidth(6)
         horizontal = QSplitter(Qt.Orientation.Horizontal)
+        horizontal.setHandleWidth(6)
+        horizontal.setChildrenCollapsible(False)
         preview_area = QFrame()
         preview_area.setObjectName("cameraPanel")
         preview_layout = QVBoxLayout(preview_area)
@@ -2141,8 +2376,6 @@ class MainWindow(QMainWindow):
         self._recognition_status = "Recognition not configured"
         horizontal.addWidget(preview_area)
         sidebar = QWidget()
-        sidebar.setMinimumWidth(310)
-        sidebar.setMaximumWidth(370)
         side = QVBoxLayout(sidebar)
         side.setContentsMargins(10, 0, 0, 0)
         side.setSpacing(8)
@@ -2256,7 +2489,16 @@ class MainWindow(QMainWindow):
             self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton), "Collect and train"
         )
         self.training_action.triggered.connect(self.open_training_collection)
-        horizontal.addWidget(sidebar)
+        self.controls_scroll = QScrollArea()
+        self.controls_scroll.setObjectName("monitorControlsScroll")
+        self.controls_scroll.setAccessibleName("Inspection and monitoring controls")
+        self.controls_scroll.setWidgetResizable(True)
+        self.controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.controls_scroll.setMinimumWidth(310)
+        self.controls_scroll.setMaximumWidth(370)
+        self.controls_scroll.setWidget(sidebar)
+        horizontal.addWidget(self.controls_scroll)
         horizontal.setStretchFactor(0, 3)
         horizontal.setStretchFactor(1, 1)
         horizontal.setSizes([820, 340])
@@ -2302,6 +2544,7 @@ class MainWindow(QMainWindow):
         self.details_scroll.setMinimumSize(250, 100)
         self.details_scroll.setWidget(self.details_panel)
         bottom = QSplitter(Qt.Orientation.Horizontal)
+        bottom.setHandleWidth(6)
         bottom.addWidget(self.details_scroll)
         self.details_scroll.hide()
         self.event_log_panel = QWidget()
@@ -2309,7 +2552,7 @@ class MainWindow(QMainWindow):
         event_log_layout.setContentsMargins(0, 6, 0, 0)
         event_log_layout.setSpacing(6)
         history_heading = QLabel("Event log")
-        history_heading.setObjectName("sectionTitle")
+        history_heading.setObjectName("panelTitle")
         history_heading.setToolTip("Session-only log, limited to 500 events")
         event_log_layout.addWidget(history_heading)
         self.history = QTableWidget(0, 6)
@@ -2330,13 +2573,15 @@ class MainWindow(QMainWindow):
         event_log_layout.addWidget(self.history)
         bottom.addWidget(self.event_log_panel)
         roi_panel = QWidget()
+        self._roi_panel = roi_panel
         roi_panel.setMinimumWidth(310)
         roi_panel.setMaximumWidth(370)
         roi_layout = QVBoxLayout(roi_panel)
         roi_layout.setContentsMargins(10, 6, 0, 0)
         roi_layout.setSpacing(6)
         self.roi_caption = QLabel("Latest inspection ROI - no result")
-        self.roi_caption.setObjectName("sectionTitle")
+        self.roi_caption.setObjectName("panelTitle")
+        self.roi_caption.setWordWrap(True)
         roi_layout.addWidget(self.roi_caption)
         self.roi_view = LiveView()
         self.roi_view.setMinimumSize(120, 60)
@@ -2350,6 +2595,7 @@ class MainWindow(QMainWindow):
         bottom.setChildrenCollapsible(False)
         bottom.setStretchFactor(0, 1)
         bottom.setStretchFactor(1, 2)
+        horizontal.splitterMoved.connect(self._align_evidence_column)
         vertical.addWidget(bottom)
         vertical.setChildrenCollapsible(False)
         self.details_button.toggled.connect(self._toggle_details)
@@ -2366,19 +2612,44 @@ class MainWindow(QMainWindow):
         self._timer.setInterval(33)
         self._timer.timeout.connect(self.poll)
         self._timer.start()
-        for first, second in (
-            (self.specimen, self.connect_button),
-            (self.camera_index, self.connect_button),
-            (self.connect_button, self.disconnect_button),
-            (self.disconnect_button, self.load_recipe_button),
-            (self.load_recipe_button, self.trial_button),
-            (self.trial_button, self.stop_work_button),
-            (self.stop_work_button, self.results_button),
-            (self.results_button, self.details_button),
-            (self.details_button, self.camera_index),
-            (self.camera_index, self.history),
-        ):
+        focus_order = (
+            self.specimen,
+            self.connect_button,
+            self.disconnect_button,
+            self.load_recipe_button,
+            self.trial_button,
+            self.stop_work_button,
+            self.results_button,
+            self.details_button,
+            self.basic_settings_button,
+            self.camera_index,
+            self.history,
+        )
+        for first, second in zip(focus_order[:-1], focus_order[1:], strict=True):
             QWidget.setTabOrder(first, second)
+        self._fit_available_screen()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """Keep inspection evidence aligned with the monitoring column after resizing.
+
+        Args:
+            event (QResizeEvent): Native window resize notification.
+        """
+        super().resizeEvent(event)
+        if hasattr(self, "_roi_panel"):
+            QTimer.singleShot(0, self._align_evidence_column)
+
+    def _align_evidence_column(self) -> None:
+        self._roi_panel.setFixedWidth(self.controls_scroll.width())
+
+    def _fit_available_screen(self) -> None:
+        screen = self.screen()
+        if screen is None:
+            return
+        available = screen.availableGeometry().adjusted(16, 16, -16, -48)
+        self.setMinimumSize(min(960, available.width()), min(640, available.height()))
+        self.resize(min(1440, available.width()), min(900, available.height()))
+        self.move(available.center() - self.rect().center())
 
     def open_offline_inspection(self) -> None:
         """Open independent offline inspection without changing the active camera run."""
@@ -2657,8 +2928,9 @@ class MainWindow(QMainWindow):
         self.recipe_summary.setText(f"Recipe: {Path(path).name}")
         self.recipe_summary.setToolTip(stored.description(Path(path)))
         self._camera_recipe = stored.recipe
-        self.specimen.setText(stored.specimen_id)
-        self.run_label.setText(f"Recipe loaded: {Path(path).name} | {stored.mode_label} | Not started")
+        name = stored.profile.name if stored.profile is not None else Path(path).stem
+        self.recipe_summary.setText(f"Recipe: {name}")
+        self.run_label.setText(f"Recipe loaded: {name} | {stored.mode_label} | Not started")
         self.run_label.setToolTip(stored.description(Path(path)))
         self.assessment_note.setText(
             "UNQUALIFIED detector selected | Start to load model"
@@ -2703,12 +2975,28 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         inspection_recipe = dialog._stored_recipe or self._loaded_camera_recipe
-        if inspection_recipe is not None and inspection_recipe[0].detector is not None:
-            if dialog.recipe != inspection_recipe[0].recipe:
-                self._set_notice(
-                    "Inspection recipe synchronization was edited. Save a new recipe before live inspection."
+        try:
+            if inspection_recipe is not None:
+                original, source = inspection_recipe
+                if load_recipe(source) != original:
+                    raise ValueError("Reusable recipe changed during setup; load it again")
+                setup = specimen_setup(
+                    original,
+                    dialog.specimen_id,
+                    dialog.recipe,
+                    SpecimenDetails(dialog.specimen_name.text().strip(), dialog.specimen_batch.text().strip()),
                 )
-                return
+            else:
+                setup = StoredRecipe(
+                    dialog.specimen_id,
+                    dialog.recipe,
+                    self.live_view._image.width(),
+                    self.live_view._image.height(),
+                    specimen=SpecimenDetails(dialog.specimen_name.text().strip(), dialog.specimen_batch.text().strip()),
+                )
+        except (OSError, ValueError) as error:
+            self._set_notice(f"Setup not accepted: {error}")
+            return
         if previous is not None:
             self.stop_marker_trial()
             if self._stopping_trial is not None:
@@ -2716,6 +3004,16 @@ class MainWindow(QMainWindow):
                 return
         live = inspection_recipe is not None and inspection_recipe[0].detector is not None
         run_id = uuid4().hex[:12]
+        try:
+            setup_path = save_run_setup(
+                INSPECTION_DIRECTORY,
+                run_id,
+                setup,
+                inspection_recipe[1] if inspection_recipe is not None else None,
+            )
+        except (OSError, ValueError) as error:
+            self._set_notice(f"Run not started: could not record setup: {error}")
+            return
         worker = None
         if live:
             stored, recipe_path = inspection_recipe
@@ -2725,6 +3023,7 @@ class MainWindow(QMainWindow):
                     recipe_path,
                     INSPECTION_DIRECTORY / f"run-{run_id}",
                     output_root=INSPECTION_DIRECTORY,
+                    setup_path=setup_path,
                 )
                 worker.start()
         try:
@@ -2738,13 +3037,13 @@ class MainWindow(QMainWindow):
             self._set_notice(str(error))
             return
         self._camera_recipe = dialog.recipe
-        self._loaded_camera_recipe = inspection_recipe if live else None
+        self._loaded_camera_recipe = inspection_recipe
         self._revision += 1
         self.specimen.setText(dialog.specimen_id)
         self.run_record = RunRecord(
             run_id,
             self.specimen.text().strip(),
-            f"synchronization-v{self._revision}",
+            f"{setup.profile.revision if setup.profile is not None else 'legacy'} / {setup_path.stem}",
             f"Generic camera index {self.camera_index.value()}",
             datetime.now(UTC),
         )
@@ -3229,6 +3528,41 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
+    def _basic_settings(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Basic settings")
+        dialog.setMinimumWidth(320)
+        layout = QVBoxLayout(dialog)
+        appearance = QFormLayout()
+        display_mode = QComboBox()
+        display_mode.setAccessibleName("Display mode")
+        display_mode.addItems(["Dark", "Light"])
+        preferences = QSettings("Anomalib", "RDT Reliability Monitor")
+        display_mode.setCurrentText("Light" if preferences.value("display_mode", "dark") == "light" else "Dark")
+
+        def change_display_mode(text: str) -> None:
+            mode = text.lower()
+            preferences.setValue("display_mode", mode)
+            _apply_display_mode(mode)
+
+        display_mode.currentTextChanged.connect(change_display_mode)
+        appearance.addRow("Display mode", display_mode)
+        layout.addLayout(appearance)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
+
+
+def _apply_display_mode(mode: str) -> None:
+    application = QApplication.instance()
+    if application is not None:
+        stylesheet = files("rdt_monitor").joinpath("styles.qss").read_text(encoding="utf-8")
+        if mode == "light":
+            stylesheet += files("rdt_monitor").joinpath("styles-light.qss").read_text(encoding="utf-8")
+        application.setStyleSheet(stylesheet)
+
+
 def main() -> int:
     """Launch the reliability monitor with inspection qualification gates intact.
 
@@ -3240,7 +3574,8 @@ def main() -> int:
     families = set(QFontDatabase.families())
     family = next((name for name in ("IBM Plex Sans", "Inter") if name in families), application.font().family())
     application.setFont(QFont(family, 10))
-    application.setStyleSheet(files("rdt_monitor").joinpath("styles.qss").read_text(encoding="utf-8"))
+    preferences = QSettings("Anomalib", "RDT Reliability Monitor")
+    _apply_display_mode(str(preferences.value("display_mode", "dark")))
     window = MainWindow()
     window.show()
     return application.exec()

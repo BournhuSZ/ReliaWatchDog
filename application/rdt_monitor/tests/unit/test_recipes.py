@@ -16,6 +16,87 @@ from rdt_monitor.recipes import RecipeDetector, StoredRecipe, load_recipe, save_
 from rdt_monitor.replay import MarkerAppearance, Region, ReplayRecipe
 
 
+def named(stored):
+    return replace(
+        stored,
+        profile=storage.RecipeProfile("a" * 32, "b" * 32, "A-type standard bending", "Long duration"),
+        specimen=storage.SpecimenDetails("Cushion A", "batch-01"),
+    )
+
+
+def test_named_recipe_round_trip_and_strict_metadata(tmp_path, stored):
+    stored = named(stored)
+    path = tmp_path / "family.json"
+    save_recipe(path, stored)
+    assert load_recipe(path) == stored
+    document = json.loads(path.read_text())
+    assert document["schema_version"] == 5
+    document["profile"]["name"] = 123
+    path.write_text(json.dumps(document))
+    with pytest.raises(ValueError):
+        load_recipe(path)
+
+
+@pytest.mark.parametrize("field,value", [("name", ""), ("notes", "x" * 2001), ("family_id", "../escape")])
+def test_named_recipe_rejects_invalid_metadata(stored, field, value):
+    with pytest.raises(ValueError):
+        replace(named(stored).profile, **{field: value})
+
+
+def test_operator_setup_reuses_model_without_modifying_parent(stored, detector):
+    parent = named(replace(stored, detector=detector))
+    markers = replace(parent.recipe, position=Region(0.7, 0.3, 0.2, 0.2))
+    setup = storage.specimen_setup(parent, "A-002", markers, storage.SpecimenDetails("A", "lot-2"))
+    assert setup.detector is parent.detector
+    assert setup.profile is parent.profile
+    assert setup.specimen_id == "A-002"
+    assert setup.recipe.position != parent.recipe.position
+    assert parent.specimen_id == "PCB-001"
+    with pytest.raises(ValueError, match="new recipe revision"):
+        storage.specimen_setup(parent, "A-002", replace(markers, brightness=42), storage.SpecimenDetails())
+
+
+def test_managed_recipe_save_without_credentials_preserves_original(tmp_path, stored, detector):
+    parent = named(replace(stored, detector=detector))
+    bundle = tmp_path / Path(detector.model_file).parent
+    bundle.mkdir()
+    (bundle / "model.xml").write_bytes(b"model")
+    (bundle / "model.bin").write_bytes(b"weights")
+    source = tmp_path / "family.json"
+    save_recipe(source, parent)
+    before = source.read_bytes()
+    target = tmp_path / "alternate.json"
+    revision = replace(parent, profile=replace(parent.profile, revision="c" * 32))
+    storage.save_managed_recipe(target, revision, source=source)
+    assert load_recipe(target).detector == detector
+    assert source.read_bytes() == before
+    assert len(list(tmp_path.glob("detector-*"))) == 1
+    with pytest.raises(FileExistsError):
+        storage.save_managed_recipe(source, revision, source=source)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    with pytest.raises(ValueError, match="beside"):
+        storage.save_managed_recipe(elsewhere / "recipe.json", revision, source=source)
+
+
+def test_run_snapshot_retains_setup_and_parent_identity(tmp_path, stored, detector):
+    source = tmp_path / "family.json"
+    parent = named(replace(stored, detector=detector))
+    save_recipe(source, parent)
+    setup = storage.specimen_setup(parent, "../../A-002", parent.recipe, storage.SpecimenDetails("A", "lot"))
+    path = storage.save_run_setup(tmp_path / "results", "a" * 12, setup, source)
+    snapshot = json.loads(path.read_text())
+    assert snapshot["setup"]["specimen_id"] == "../../A-002"
+    assert snapshot["setup"]["detector"]["model_sha256"] == detector.model_sha256
+    assert snapshot["setup"]["profile"]["revision"] == parent.profile.revision
+    assert snapshot["recipe_sha256"] == storage.file_digest(source)
+    assert source.read_bytes() != path.read_bytes()
+    with pytest.raises(FileExistsError):
+        storage.save_run_setup(tmp_path / "results", "a" * 12, setup, source)
+    with pytest.raises(ValueError):
+        storage.save_run_setup(tmp_path / "results", "../outside", setup, source)
+
+
 @pytest.fixture
 def stored():
     return StoredRecipe(
