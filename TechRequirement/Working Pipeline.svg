@@ -1,0 +1,242 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 1360" role="img" aria-labelledby="title desc">
+  <title id="title">ReliaWatchDog implemented code pipeline</title>
+  <desc id="desc">A source-linked map of the implemented live camera, synchronization, optional cycle inspection, operator-reviewed training, replay diagnostics, and offline inspection workflows in the RDT monitor.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#6d8197"/></marker>
+    <marker id="arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#d06b4f"/></marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#4f9b73"/></marker>
+    <style>
+      .page { fill:#f4f2ed; }
+      .ink { fill:#202b36; }
+      .muted { fill:#596a79; }
+      .soft { fill:#82909c; }
+      .lane { fill:#fbfaf7; stroke:#d8d5ce; stroke-width:1.5; }
+      .lane-live { fill:#f8f8f5; stroke:#b9c6cf; stroke-width:1.5; }
+      .lane-training { fill:#faf7f1; stroke:#decfb4; stroke-width:1.5; }
+      .lane-tools { fill:#f7f8f8; stroke:#cdd5d9; stroke-width:1.5; }
+      .node { fill:#fff; stroke:#cbd2d7; stroke-width:1.5; }
+      .node-live { fill:#fff; stroke:#aebfca; stroke-width:1.6; }
+      .node-data { fill:#f2f5f6; stroke:#c1cbd0; stroke-width:1.4; }
+      .node-human { fill:#fff8e9; stroke:#dcc58f; stroke-width:1.5; }
+      .node-model { fill:#eef6f0; stroke:#a8c9b3; stroke-width:1.5; }
+      .node-optional { fill:#f7f3ed; stroke:#d4c7af; stroke-width:1.5; }
+      .warning { fill:#fff2ee; stroke:#d9a18e; stroke-width:1.4; }
+      .edge { fill:none; stroke:#6d8197; stroke-width:2.4; marker-end:url(#arrow); }
+      .edge-data { fill:none; stroke:#8998a5; stroke-width:2.2; stroke-dasharray:7 6; marker-end:url(#arrow); }
+      .edge-accent { fill:none; stroke:#d06b4f; stroke-width:2.7; marker-end:url(#arrow-accent); }
+      .edge-green { fill:none; stroke:#4f9b73; stroke-width:2.6; marker-end:url(#arrow-green); }
+      .eyebrow { font:700 13px 'Segoe UI',Arial,sans-serif; letter-spacing:1.6px; }
+      .title { font:700 38px 'Segoe UI',Arial,sans-serif; letter-spacing:-.5px; }
+      .subtitle { font:400 17px 'Segoe UI',Arial,sans-serif; }
+      .lane-title { font:700 19px 'Segoe UI',Arial,sans-serif; }
+      .lane-note { font:400 13px 'Segoe UI',Arial,sans-serif; }
+      .node-title { font:700 16px 'Segoe UI',Arial,sans-serif; }
+      .node-copy { font:400 13px 'Segoe UI',Arial,sans-serif; }
+      .node-mono { font:600 11px Consolas,'Courier New',monospace; }
+      .edge-label { font:600 11px 'Segoe UI',Arial,sans-serif; fill:#596a79; }
+      .pill-text { font:700 11px 'Segoe UI',Arial,sans-serif; letter-spacing:.5px; }
+      .foot { font:400 12px 'Segoe UI',Arial,sans-serif; }
+      a { text-decoration:none; }
+      a:hover .node { stroke:#d06b4f; stroke-width:2.4; }
+      a:focus .node { stroke:#d06b4f; stroke-width:3; }
+    </style>
+  </defs>
+
+  <rect class="page" width="1680" height="1360"/>
+  <text x="52" y="48" class="eyebrow" fill="#a1513c">RELIAWATCHDOG · RDT MONITOR</text>
+  <text x="52" y="96" class="title ink">Implemented pipeline</text>
+  <text x="54" y="126" class="subtitle muted">A map of the current code paths — live operation, model training, and diagnostic tools are separate flows.</text>
+  <rect x="1325" y="47" width="302" height="40" rx="20" fill="#fff2ee" stroke="#d9a18e"/>
+  <circle cx="1348" cy="67" r="5" fill="#c35b42"/>
+  <text x="1362" y="71" class="pill-text" fill="#873c2c">DEVELOPMENT · NOT QUALIFIED</text>
+
+  <!-- LIVE CAMERA AND CYCLE-INSPECTION FLOW -->
+  <rect x="40" y="154" width="1600" height="526" rx="18" class="lane-live"/>
+  <text x="68" y="190" class="lane-title ink">01 · Live camera and cycle inspection</text>
+  <text x="68" y="212" class="lane-note muted">Inspection starts only after a recipe is reviewed and the synchronization setup is explicitly confirmed.</text>
+
+  <!-- Setup and frame acquisition row -->
+  <a href="../application/rdt_monitor/src/rdt_monitor/recipes.py" aria-label="Open recipe implementation">
+    <rect x="68" y="239" width="238" height="104" rx="10" class="node-live"/>
+    <text x="88" y="267" class="node-title ink">Recipe + run setup</text>
+    <text x="88" y="291" class="node-copy muted">Validated marker regions, optional</text>
+    <text x="88" y="309" class="node-copy muted">detector binding, specimen identity</text>
+    <text x="88" y="330" class="node-mono muted">recipes.py</text>
+  </a>
+  <a href="../application/rdt_monitor/src/rdt_monitor/app.py" aria-label="Open monitor UI implementation">
+    <rect x="354" y="239" width="235" height="104" rx="10" class="node-live"/>
+    <text x="374" y="267" class="node-title ink">PyQt monitor UI</text>
+    <text x="374" y="291" class="node-copy muted">Load → review → confirm Start</text>
+    <text x="374" y="309" class="node-copy muted">Polls worker queues and renders state</text>
+    <text x="374" y="330" class="node-mono muted">app.py · MainWindow</text>
+  </a>
+  <a href="../application/rdt_monitor/src/rdt_monitor/camera.py" aria-label="Open camera worker implementation">
+    <rect x="638" y="239" width="252" height="104" rx="10" class="node-live"/>
+    <text x="658" y="267" class="node-title ink">CameraPreview worker</text>
+    <text x="658" y="291" class="node-copy muted">Owns open / read / close</text>
+    <text x="658" y="309" class="node-copy muted">Frames carry ID + host read time</text>
+    <text x="658" y="330" class="node-mono muted">camera.py</text>
+  </a>
+  <a href="../application/rdt_monitor/src/rdt_monitor/app.py" aria-label="Open UI preview and status implementation">
+    <rect x="1218" y="239" width="365" height="104" rx="10" class="node-data"/>
+    <text x="1238" y="267" class="node-title ink">Preview + operator status</text>
+    <text x="1238" y="291" class="node-copy muted">Freshness, camera health, counters, event log,</text>
+    <text x="1238" y="309" class="node-copy muted">latest verdict, and source-aligned ROI view</text>
+    <text x="1238" y="330" class="node-mono muted">MainWindow.poll()</text>
+  </a>
+  <path d="M306 291 H350" class="edge-data"/>
+  <text x="313" y="280" class="edge-label">settings</text>
+  <path d="M589 291 H634" class="edge"/>
+  <text x="596" y="280" class="edge-label">connect</text>
+  <path d="M890 291 H1214" class="edge-data"/>
+  <text x="994" y="280" class="edge-label">bounded latest-frame preview</text>
+
+  <!-- Synchronization row -->
+  <a href="../application/rdt_monitor/src/rdt_monitor/camera.py" aria-label="Open marker trial implementation">
+    <rect x="354" y="389" width="235" height="104" rx="10" class="node-live"/>
+    <text x="374" y="417" class="node-title ink">MarkerTrial</text>
+    <text x="374" y="441" class="node-copy muted">Consumes each camera frame before</text>
+    <text x="374" y="459" class="node-copy muted">preview replacement; bounded events</text>
+    <text x="374" y="480" class="node-mono muted">camera.py</text>
+  </a>
+  <a href="../application/rdt_monitor/src/rdt_monitor/replay.py" aria-label="Open marker recognition and recipe implementation">
+    <rect x="638" y="389" width="252" height="104" rx="10" class="node-live"/>
+    <text x="658" y="417" class="node-title ink">Marker recognition</text>
+    <text x="658" y="441" class="node-copy muted">Start + Position regions classified</text>
+    <text x="658" y="459" class="node-copy muted">using saved appearance or legacy mode</text>
+    <text x="658" y="480" class="node-mono muted">ReplayRecipe.classify()</text>
+  </a>
+  <a href="../application/rdt_monitor/src/rdt_monitor/synchronization.py" aria-label="Open cycle synchronizer implementation">
+    <rect x="938" y="389" width="252" height="104" rx="10" class="node-live"/>
+    <text x="958" y="417" class="node-title ink">CycleSynchronizer</text>
+    <text x="958" y="441" class="node-copy muted">Counts only after both marks leave</text>
+    <text x="958" y="459" class="node-copy muted">and return; faults on lost coverage</text>
+    <text x="958" y="480" class="node-mono muted">synchronization.py</text>
+  </a>
+  <a href="../application/rdt_monitor/src/rdt_monitor/lifecycle.py" aria-label="Open run lifecycle implementation">
+    <rect x="1238" y="389" width="300" height="104" rx="10" class="node-live"/>
+    <text x="1258" y="417" class="node-title ink">RunLifecycle</text>
+    <text x="1258" y="441" class="node-copy muted">Creates a cycle ticket; tracks inspected,</text>
+    <text x="1258" y="459" class="node-copy muted">uninspected, degraded, and stop state</text>
+    <text x="1258" y="480" class="node-mono muted">lifecycle.py</text>
+  </a>
+  <path d="M764 343 V365 H620 V441 H593" class="edge"/>
+  <text x="640" y="360" class="edge-label">each camera frame</text>
+  <path d="M589 441 H634" class="edge"/>
+  <path d="M890 441 H934" class="edge"/>
+  <path d="M1190 441 H1234" class="edge"/>
+  <path d="M470 343 V385" class="edge-data"/>
+  <text x="482" y="369" class="edge-label">Start + confirm</text>
+  <rect x="938" y="510" width="600" height="36" rx="18" fill="#fff8e9" stroke="#dcc58f"/>
+  <text x="958" y="533" class="pill-text" fill="#7a6332">COUNTING-ONLY RECIPE → cycle is recorded as uninspected; no detector is inferred.</text>
+
+  <!-- Detector and evidence row -->
+  <a href="../application/rdt_monitor/src/rdt_monitor/live.py" aria-label="Open live inspection worker implementation">
+    <rect x="354" y="558" width="270" height="94" rx="10" class="node-live"/>
+    <text x="374" y="585" class="node-title ink">LiveInspection worker</text>
+    <text x="374" y="608" class="node-copy muted">Bounded exact-frame intake; separate</text>
+    <text x="374" y="626" class="node-copy muted">model loading, inference, and writes</text>
+    <text x="374" y="645" class="node-mono muted">live.py</text>
+  </a>
+  <a href="../application/rdt_monitor/src/rdt_monitor/detection.py" aria-label="Open model inference implementation">
+    <rect x="674" y="558" width="270" height="94" rx="10" class="node-model"/>
+    <text x="694" y="585" class="node-title ink">Exported-model inference</text>
+    <text x="694" y="608" class="node-copy muted">OpenVINO / ONNX adapter; exact ROI,</text>
+    <text x="694" y="626" class="node-copy muted">normalized score + aligned heatmap</text>
+    <text x="694" y="645" class="node-mono muted">detection.py</text>
+  </a>
+  <a href="../application/rdt_monitor/src/rdt_monitor/live.py" aria-label="Open per-cycle evidence implementation">
+    <rect x="994" y="558" width="274" height="94" rx="10" class="node-data"/>
+    <text x="1014" y="585" class="node-title ink">Per-cycle evidence</text>
+    <text x="1014" y="608" class="node-copy muted">Local image(s) + result metadata; write</text>
+    <text x="1014" y="626" class="node-copy muted">failure remains unknown / incomplete</text>
+    <text x="1014" y="645" class="node-mono muted">inspection-results/</text>
+  </a>
+  <path d="M1388 493 V535 H489 V554" class="edge-accent"/>
+  <text x="1024" y="530" class="edge-label" fill="#a1513c">detector-bound cycle ticket + source frame</text>
+  <path d="M624 605 H670" class="edge"/>
+  <path d="M944 605 H990" class="edge"/>
+  <path d="M1268 605 H1618 V229 H1400 V235" class="edge-data"/>
+  <text x="1335" y="625" class="edge-label">CycleDetection → MainWindow verdict / log / ROI</text>
+
+  <!-- TRAINING FLOW -->
+  <rect x="40" y="704" width="1600" height="284" rx="18" class="lane-training"/>
+  <text x="68" y="741" class="lane-title ink">02 · Candidate collection and model training</text>
+  <text x="68" y="763" class="lane-note muted">Training is a distinct, operator-driven pipeline. Export completion does not activate a detector.</text>
+  <a href="../application/rdt_monitor/src/rdt_monitor/collection.py" aria-label="Open candidate collection implementation">
+    <rect x="68" y="795" width="250" height="124" rx="10" class="node-data"/>
+    <text x="88" y="824" class="node-title ink">Collect candidates</text>
+    <text x="88" y="848" class="node-copy muted">Distinct cycle source + ROI crops</text>
+    <text x="88" y="866" class="node-copy muted">Hashes + collection manifest</text>
+    <text x="88" y="895" class="node-mono muted">collection.py</text>
+  </a>
+  <rect x="348" y="795" width="250" height="124" rx="10" class="node-human"/>
+  <text x="368" y="824" class="node-title ink">Review every candidate</text>
+  <text x="368" y="848" class="node-copy muted">Operator checks source and crop;</text>
+  <text x="368" y="866" class="node-copy muted">explicit undamaged confirmation</text>
+  <text x="368" y="895" class="node-mono muted">never inferred from cycle count</text>
+  <a href="../application/rdt_monitor/src/rdt_monitor/training.py" aria-label="Open separate model training process">
+    <rect x="628" y="795" width="250" height="124" rx="10" class="node-live"/>
+    <text x="648" y="824" class="node-title ink">Separate train process</text>
+    <text x="648" y="848" class="node-copy muted">Verifies manifest, hashes, dimensions,</text>
+    <text x="648" y="866" class="node-copy muted">and exact source-to-crop integrity</text>
+    <text x="648" y="895" class="node-mono muted">training.py</text>
+  </a>
+  <a href="../application/rdt_monitor/src/rdt_monitor/training.py" aria-label="Open PatchCore fit and export implementation">
+    <rect x="908" y="795" width="250" height="124" rx="10" class="node-model"/>
+    <text x="928" y="824" class="node-title ink">PatchCore fit + export</text>
+    <text x="928" y="848" class="node-copy muted">Anomalib CPU fit on reviewed normal</text>
+    <text x="928" y="866" class="node-copy muted">crops → OpenVINO model bundle</text>
+    <text x="928" y="895" class="node-mono muted">new training job</text>
+  </a>
+  <a href="../application/rdt_monitor/src/rdt_monitor/recipes.py" aria-label="Open inspection recipe implementation">
+    <rect x="1188" y="795" width="394" height="124" rx="10" class="node-live"/>
+    <text x="1208" y="824" class="node-title ink">Save inspection recipe</text>
+    <text x="1208" y="848" class="node-copy muted">Binds model hashes, ROI, thresholds, and specimen family.</text>
+    <text x="1208" y="866" class="node-copy muted">Operator must load, review, and confirm it before a later run.</text>
+    <text x="1208" y="895" class="node-mono muted">recipes.py · explicit activation</text>
+  </a>
+  <path d="M318 857 H344" class="edge"/>
+  <path d="M598 857 H624" class="edge"/>
+  <path d="M878 857 H904" class="edge"/>
+  <path d="M1158 857 H1184" class="edge-green"/>
+  <path d="M1385 795 V732 H188 V347" class="edge-data"/>
+  <text x="909" y="726" class="edge-label">new version · operator loads it; no automatic activation</text>
+  <path d="M490 652 V692 H193 V791" class="edge-data"/>
+  <text x="243" y="688" class="edge-label">camera/cycle frames · auto or manual collection</text>
+
+  <!-- DIAGNOSTIC AND OFFLINE TOOL FLOWS -->
+  <rect x="40" y="1012" width="1600" height="278" rx="18" class="lane-tools"/>
+  <text x="68" y="1049" class="lane-title ink">03 · Diagnostic and offline tools</text>
+  <text x="68" y="1071" class="lane-note muted">These paths help inspect behavior; they do not qualify the live station.</text>
+  <rect x="68" y="1101" width="700" height="112" rx="10" class="node-optional"/>
+  <text x="88" y="1126" class="node-title ink">Replay diagnostics</text>
+  <rect x="88" y="1141" width="178" height="54" rx="7" class="node"/>
+  <text x="101" y="1163" class="node-copy ink">Fixture / recording</text>
+  <text x="101" y="1182" class="node-mono muted">SyntheticSource / VideoSource</text>
+  <rect x="315" y="1141" width="164" height="54" rx="7" class="node"/>
+  <text x="332" y="1164" class="node-copy ink">ReplayPipeline</text>
+  <text x="332" y="1182" class="node-mono muted">replay.py</text>
+  <rect x="527" y="1141" width="220" height="54" rx="7" class="node"/>
+  <text x="544" y="1163" class="node-copy ink">Sync events + UI log</text>
+  <text x="544" y="1182" class="node-mono muted">no live detector / evidence</text>
+  <path d="M266 1168 H311" class="edge"/>
+  <path d="M479 1168 H523" class="edge"/>
+  <rect x="800" y="1101" width="782" height="112" rx="10" class="node-optional"/>
+  <text x="820" y="1126" class="node-title ink">Offline image inspection</text>
+  <rect x="820" y="1141" width="190" height="54" rx="7" class="node"/>
+  <text x="834" y="1163" class="node-copy ink">Image + model</text>
+  <text x="834" y="1182" class="node-mono muted">operator-selected</text>
+  <rect x="1056" y="1141" width="192" height="54" rx="7" class="node"/>
+  <text x="1070" y="1163" class="node-copy ink">InspectionWorker</text>
+  <text x="1070" y="1182" class="node-mono muted">detection.py</text>
+  <rect x="1294" y="1141" width="268" height="54" rx="7" class="node"/>
+  <text x="1308" y="1163" class="node-copy ink">Score + aligned heatmap</text>
+  <text x="1308" y="1182" class="node-mono muted">one image · not run evidence</text>
+  <path d="M1010 1168 H1052" class="edge"/>
+  <path d="M1248 1168 H1290" class="edge"/>
+
+  <rect x="68" y="1230" width="1514" height="38" rx="8" class="warning"/>
+  <text x="88" y="1254" class="foot" fill="#713e31"><tspan font-weight="700">Current boundary:</tspan> local development evidence and session state; no SQLite incident store, authenticated supervisor workflow, controller trigger, automatic model activation, or production qualification.</text>
+  <text x="68" y="1320" class="foot muted">Select a code node to open its source file. Arrow direction shows implemented data or control flow; dashed arrows show configuration, preview, or returned UI state.</text>
+</svg>

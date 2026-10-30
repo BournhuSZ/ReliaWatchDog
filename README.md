@@ -63,6 +63,7 @@ Anomalib is a deep learning library that aims to collect state-of-the-art anomal
 
 The standalone Windows camera/inspection UI is in [application/rdt_monitor](application/rdt_monitor).
 See its [operator and development guide](application/rdt_monitor/README.md) for the full workflow.
+See the [implemented code pipeline diagram](TechRequirement/Working%20Pipeline.svg) for linked paths through the current camera, synchronization, training, inference, and evidence code.
 The paths below describe this workstation, whose repository is **`D:\anomalib`**.
 Generated IDs and operator-selected directories vary between collections and runs.
 This is an **unqualified development inspection system**, not a production defect-detection guarantee.

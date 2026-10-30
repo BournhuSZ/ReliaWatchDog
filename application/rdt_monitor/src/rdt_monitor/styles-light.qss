@@ -53,3 +53,39 @@ QScrollBar::handle:horizontal { background: #A7AFBA; }
 QScrollBar::handle:hover { background: #626B76; }
 QAbstractScrollArea::corner { background: #EAEDF1; }
 QToolTip { color: #20242A; background: #FFFFFF; border-color: #626B76; }
+
+/* Refined monitor hierarchy and compact state indicators. */
+QWidget#monitorSurface { background-color: #EEF1F5; }
+QWidget#monitorHeader { border-bottom-color: #CCD4DE; }
+QLabel#title { color: #172433; }
+QFrame#cameraPanel, QFrame#verdictPanel, QFrame#controlPanel {
+    background-color: #FFFFFF;
+    border-color: #C5CED8;
+    border-radius: 10px;
+}
+QFrame#cameraPanel { border-top: 2px solid #6486A6; }
+QFrame#verdictPanel { border-top: 2px solid #6486A6; }
+QFrame#controlPanel { border-top: 2px solid #4B8B62; }
+QLabel#panelTitle { color: #526477; }
+QLabel#sectionTitle { color: #202B37; }
+QLabel#caption { color: #5E6A77; }
+QLabel#counter { color: #172433; }
+QLabel#statusBadge {
+    background-color: #F0F3F6;
+    color: #4B5865;
+    border-color: #C7D0D9;
+}
+QLabel#statusBadge[status="active"] { color: #21683B; background-color: #EAF6EE; border-color: #9BC9A8; }
+QLabel#statusBadge[status="attention"] { color: #795411; background-color: #FFF5DF; border-color: #E5C77E; }
+QLabel#statusBadge[status="offline"] { color: #596674; }
+QPushButton#primary { background: #237646; border-color: #237646; color: #FFFFFF; }
+QPushButton#primary:hover { background: #2C8953; border-color: #2C8953; }
+QPushButton#primary:pressed { background: #1B5F39; }
+QPushButton#stopAction { color: #8E293B; border-color: #D7A2AA; background: #FFF5F6; }
+QPushButton#stopAction:hover { background: #FCE6E9; border-color: #B94F60; }
+QPushButton:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
+QPlainTextEdit:focus, QTableWidget:focus { border: 2px solid #2673C5; }
+QTableWidget { border-radius: 7px; }
+QHeaderView::section { font-size: 11px; font-weight: 600; }
+QScrollBar:vertical, QScrollBar:horizontal { border-radius: 5px; }
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal { border-radius: 5px; }

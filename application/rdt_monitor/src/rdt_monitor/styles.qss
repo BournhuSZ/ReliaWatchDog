@@ -138,3 +138,44 @@ QScrollBar::handle:hover { background: #9AA0A6; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 QAbstractScrollArea::corner { background: #171A21; }
 QToolTip { color: #E8EAED; background: #1E222B; border: 1px solid #9AA0A6; padding: 6px; }
+
+/* Refined monitor hierarchy and compact state indicators. */
+QWidget#monitorSurface { background-color: #0A1017; }
+QWidget#monitorHeader { padding-bottom: 6px; border-bottom: 1px solid #263647; }
+QLabel#title { color: #F5F8FC; font-size: 20px; font-weight: 700; letter-spacing: 0.4px; }
+QFrame#cameraPanel, QFrame#verdictPanel, QFrame#controlPanel {
+    background-color: #101A25;
+    border: 1px solid #2A3A4B;
+    border-radius: 10px;
+}
+QFrame#cameraPanel { border-top: 2px solid #35516B; }
+QFrame#verdictPanel { border-top: 2px solid #4B6B87; }
+QFrame#controlPanel { border-top: 2px solid #3A6B52; }
+QLabel#panelTitle { color: #B7C7D8; font-size: 11px; font-weight: 700; letter-spacing: 0.8px; }
+QLabel#sectionTitle { color: #E8EEF5; font-size: 15px; font-weight: 600; }
+QLabel#caption { color: #9EADBD; }
+QLabel#counter { color: #F5F8FC; font-size: 30px; font-weight: 700; }
+QLabel#statusBadge {
+    background-color: #1B2734;
+    color: #BEC9D5;
+    border: 1px solid #344454;
+    border-radius: 11px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+QLabel#statusBadge[status="active"] { color: #8DE0A8; background-color: #14291F; border-color: #2B6841; }
+QLabel#statusBadge[status="attention"] { color: #FFD27A; background-color: #302515; border-color: #795A25; }
+QLabel#statusBadge[status="offline"] { color: #AEB9C5; }
+QWidget#cameraToolbar QPushButton, QWidget#monitorHeader QPushButton { border-radius: 7px; }
+QPushButton#primary { background: #277A4A; border-color: #3F9A64; color: #F4FFF7; }
+QPushButton#primary:hover { background: #318B57; border-color: #70C18B; }
+QPushButton#primary:pressed { background: #1D613A; }
+QPushButton#stopAction { color: #FFD2D7; border-color: #74434C; background: #2A1A1F; }
+QPushButton#stopAction:hover { background: #3A2027; border-color: #B75B6C; }
+QPushButton:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
+QPlainTextEdit:focus, QTableWidget:focus { border: 2px solid #69A9F5; }
+QTableWidget { border-radius: 7px; alternate-background-color: #131C27; }
+QHeaderView::section { font-size: 11px; font-weight: 600; }
+QScrollBar:vertical, QScrollBar:horizontal { border-radius: 5px; }
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal { border-radius: 5px; }

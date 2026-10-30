@@ -120,6 +120,24 @@ RECIPE_DIRECTORY = Path(__file__).resolve().parents[4] / "recipes"
 INSPECTION_DIRECTORY = Path(__file__).resolve().parents[4] / "inspection-results"
 
 
+def _fit_dialog_to_screen(
+    dialog: QDialog,
+    preferred_size: tuple[int, int],
+    minimum_size: tuple[int, int],
+) -> None:
+    """Size and center a dialog within the owning Windows screen's usable area."""
+    parent = dialog.parentWidget()
+    screen = parent.screen() if parent is not None else QApplication.primaryScreen()
+    if screen is None:
+        return
+    available = screen.availableGeometry().adjusted(12, 12, -12, -12)
+    width = min(preferred_size[0], available.width())
+    height = min(preferred_size[1], available.height())
+    dialog.setMinimumSize(min(minimum_size[0], width), min(minimum_size[1], height))
+    dialog.resize(width, height)
+    dialog.move(available.center() - dialog.rect().center())
+
+
 def _inspection_overlay(result: DetectionResult) -> Image:
     image = result.source_image.copy()
     left, top, right, bottom = result.settings.region.pixels(image)
@@ -147,7 +165,7 @@ class _VerdictLabel(QLabel):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         diameter = min(self.width() - 16, self.height() - 32, 176)
         ring = QRectF((self.width() - diameter) / 2, 5, diameter, diameter)
-        painter.setBrush(QColor("#09131C"))
+        painter.setBrush(QColor(str(self.property("surface_color") or "#09131C")))
         painter.setPen(QPen(foreground, 2.5))
         painter.drawEllipse(ring)
         center = ring.center()
@@ -777,6 +795,7 @@ class ReplaySettings(QDialog):
             self._brightness.setEnabled(False)
         if self.preview is not None:
             self._validate()
+            _fit_dialog_to_screen(self, (1000, 680), (820, 540))
 
     def _identity_changed(self) -> None:
         self.specimen_id = self.specimen_input.text().strip()
@@ -1209,6 +1228,7 @@ class OfflineInspectionDialog(QDialog):
         self._timer.timeout.connect(self._poll_result)
         self._timer.start()
         self._refresh()
+        _fit_dialog_to_screen(self, (1100, 740), (800, 600))
 
     def _command(self, text: str, icon: QStyle.StandardPixmap, callback: Callable[[], None]) -> QPushButton:
         button = QPushButton(self.style().standardIcon(icon), text)
@@ -1651,6 +1671,7 @@ class TrainingCollectionDialog(QDialog):
         self.cycle_mode.currentIndexChanged.connect(self._refresh)
         self._use_camera()
         self._refresh()
+        _fit_dialog_to_screen(self, (1120, 820), (880, 720))
 
     def _button(self, text: str, icon: QStyle.StandardPixmap, callback: Callable[[], None]) -> QPushButton:
         button = QPushButton(self.style().standardIcon(icon), text)
@@ -2346,8 +2367,10 @@ class MainWindow(QMainWindow):
         self.source_label.setObjectName("caption")
         self.run_label.setObjectName("caption")
         vertical = QSplitter(Qt.Orientation.Vertical)
+        self.vertical_splitter = vertical
         vertical.setHandleWidth(6)
         horizontal = QSplitter(Qt.Orientation.Horizontal)
+        self.horizontal_splitter = horizontal
         horizontal.setHandleWidth(6)
         horizontal.setChildrenCollapsible(False)
         preview_area = QFrame()
@@ -2361,8 +2384,8 @@ class MainWindow(QMainWindow):
         preview_header.addWidget(self.preview_title)
         preview_header.addStretch()
         self.camera_connection = QLabel("Disconnected")
-        self.camera_connection.setObjectName("cameraConnection")
-        self.camera_connection.setProperty("connected", False)
+        self.camera_connection.setObjectName("statusBadge")
+        self.camera_connection.setProperty("status", "offline")
         preview_header.addWidget(self.camera_connection)
         preview_layout.addLayout(preview_header)
         self.frame_label = QLabel("Live view")
@@ -2393,6 +2416,8 @@ class MainWindow(QMainWindow):
         verdict_layout.addWidget(assessment_title)
         self.condition = _VerdictLabel()
         self.condition.setObjectName("cycleVerdict")
+        display_mode = QApplication.instance().property("display_mode")
+        self.condition.setProperty("surface_color", "#FFFFFF" if display_mode == "light" else "#09131C")
         self.condition.setFixedHeight(132)
         self.condition.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self.condition.setWordWrap(True)
@@ -2417,7 +2442,8 @@ class MainWindow(QMainWindow):
         control_heading.addWidget(control_title)
         control_heading.addStretch()
         self.operator_status = QLabel("Stopped")
-        self.operator_status.setObjectName("caption")
+        self.operator_status.setObjectName("statusBadge")
+        self.operator_status.setProperty("status", "offline")
         control_heading.addWidget(self.operator_status)
         control_layout.addLayout(control_heading)
         run_buttons = QHBoxLayout()
@@ -2501,7 +2527,6 @@ class MainWindow(QMainWindow):
         horizontal.addWidget(self.controls_scroll)
         horizontal.setStretchFactor(0, 3)
         horizontal.setStretchFactor(1, 1)
-        horizontal.setSizes([820, 340])
         vertical.addWidget(horizontal)
         self.details_panel = QWidget()
         history_layout = QVBoxLayout(self.details_panel)
@@ -2544,6 +2569,7 @@ class MainWindow(QMainWindow):
         self.details_scroll.setMinimumSize(250, 100)
         self.details_scroll.setWidget(self.details_panel)
         bottom = QSplitter(Qt.Orientation.Horizontal)
+        self.bottom_splitter = bottom
         bottom.setHandleWidth(6)
         bottom.addWidget(self.details_scroll)
         self.details_scroll.hide()
@@ -2601,7 +2627,6 @@ class MainWindow(QMainWindow):
         self.details_button.toggled.connect(self._toggle_details)
         vertical.setStretchFactor(0, 3)
         vertical.setStretchFactor(1, 1)
-        vertical.setSizes([480, 150])
         layout.addWidget(vertical, 1)
         self.fault = QLabel("")
         self.fault.setObjectName("warning")
@@ -2628,6 +2653,7 @@ class MainWindow(QMainWindow):
         for first, second in zip(focus_order[:-1], focus_order[1:], strict=True):
             QWidget.setTabOrder(first, second)
         self._fit_available_screen()
+        QTimer.singleShot(0, self._fit_layout_to_window)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         """Keep inspection evidence aligned with the monitoring column after resizing.
@@ -2637,10 +2663,33 @@ class MainWindow(QMainWindow):
         """
         super().resizeEvent(event)
         if hasattr(self, "_roi_panel"):
-            QTimer.singleShot(0, self._align_evidence_column)
+            QTimer.singleShot(0, self._fit_layout_to_window)
 
     def _align_evidence_column(self) -> None:
         self._roi_panel.setFixedWidth(self.controls_scroll.width())
+
+    def _fit_layout_to_window(self) -> None:
+        """Set stable splitter proportions from the actual Windows client size."""
+        if self.horizontal_splitter.width() <= 0 or self.vertical_splitter.height() <= 0:
+            return
+        available_width = self.horizontal_splitter.width()
+        sidebar_width = min(max(round(available_width * 0.26), 310), 370)
+        sidebar_width = min(sidebar_width, max(1, available_width - 320))
+        self.horizontal_splitter.setSizes([available_width - sidebar_width, sidebar_width])
+
+        available_height = self.vertical_splitter.height()
+        evidence_height = min(max(round(available_height * 0.24), 120), 210)
+        evidence_height = min(evidence_height, max(1, available_height - 300))
+        self.vertical_splitter.setSizes([available_height - evidence_height, evidence_height])
+
+        bottom_width = self.bottom_splitter.width()
+        evidence_width = min(sidebar_width, max(1, bottom_width - 260))
+        detail_width = min(round(bottom_width * 0.25), max(0, bottom_width - evidence_width - 240))
+        event_width = max(1, bottom_width - evidence_width - detail_width)
+        self.bottom_splitter.setSizes(
+            [detail_width if not self.details_scroll.isHidden() else 0, event_width, evidence_width]
+        )
+        self._align_evidence_column()
 
     def _fit_available_screen(self) -> None:
         screen = self.screen()
@@ -2663,6 +2712,7 @@ class MainWindow(QMainWindow):
         self.details_scroll.setVisible(visible)
         self.details_button.setText("Hide details" if visible else "Details")
         self.details_button.setAccessibleName("Hide technical details" if visible else "Show technical details")
+        QTimer.singleShot(0, self._fit_layout_to_window)
 
     def open_training_collection(self) -> None:
         """Open explicit candidate collection/review without starting capture or training."""
@@ -2724,6 +2774,13 @@ class MainWindow(QMainWindow):
         if self.camera is not None and self.camera.status.state == "Fault":
             status = "Camera unavailable"
         self.operator_status.setText(status)
+        status_key = "attention" if status in {"Needs attention", "Camera unavailable"} else (
+            "active" if status == "Running" else "offline"
+        )
+        if self.operator_status.property("status") != status_key:
+            self.operator_status.setProperty("status", status_key)
+            self.operator_status.style().unpolish(self.operator_status)
+            self.operator_status.style().polish(self.operator_status)
         connected = False
         connection = "Disconnected"
         self.preview_title.setText("CAMERA VIEW")
@@ -2739,8 +2796,11 @@ class MainWindow(QMainWindow):
             connection = "Replay" if self.pipeline.alive else "Replay stopped"
             self.preview_title.setText("SYNTHETIC PREVIEW" if self._synthetic else "RECORDING VIEW")
         self.camera_connection.setText(connection)
-        if self.camera_connection.property("connected") != connected:
-            self.camera_connection.setProperty("connected", connected)
+        connection_key = "active" if connection in {"Live", "Replay"} else (
+            "attention" if connection in {"Preview stale", "Unavailable", "Replay stopped"} else "offline"
+        )
+        if self.camera_connection.property("status") != connection_key:
+            self.camera_connection.setProperty("status", connection_key)
             self.camera_connection.style().unpolish(self.camera_connection)
             self.camera_connection.style().polish(self.camera_connection)
         failed = snapshot.uninspected if snapshot.mode != RunMode.DEVELOPMENT else 0
@@ -3557,10 +3617,15 @@ class MainWindow(QMainWindow):
 def _apply_display_mode(mode: str) -> None:
     application = QApplication.instance()
     if application is not None:
+        application.setProperty("display_mode", mode)
         stylesheet = files("rdt_monitor").joinpath("styles.qss").read_text(encoding="utf-8")
         if mode == "light":
             stylesheet += files("rdt_monitor").joinpath("styles-light.qss").read_text(encoding="utf-8")
         application.setStyleSheet(stylesheet)
+        for verdict in application.allWidgets():
+            if isinstance(verdict, _VerdictLabel):
+                verdict.setProperty("surface_color", "#FFFFFF" if mode == "light" else "#09131C")
+                verdict.update()
 
 
 def main() -> int:

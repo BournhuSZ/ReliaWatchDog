@@ -15,12 +15,14 @@ inspection is planned, not currently implemented.
 ## Display Settings
 
 The monitor opens centered within the current screen's usable area, up to 1440 x 900.
-It remains freely resizable rather than locking an aspect ratio. Short windows keep
-monitoring controls accessible in a scrollable right column; camera images retain
-their own proportions. Window sizing uses Qt's logical pixels and excludes the taskbar.
-Drag the dividers to adjust camera/control widths and the monitoring/evidence heights.
-The latest-inspection ROI remains aligned with the control column when resizing or
-dragging the upper divider. Details and the event log remain independently scrollable.
+It remains freely resizable rather than locking an aspect ratio. The camera, controls,
+event log, and evidence columns receive consistent proportions from the current window
+size; the latest-inspection ROI stays aligned with the control column. Short windows keep
+monitoring controls in a scrollable right column, while camera images retain their
+proportions. Dialogs are centered and sized to the current screen's usable area. All
+sizing uses Qt logical pixels and excludes the taskbar. Divider dragging remains available
+for temporary personal adjustment, but the application establishes the layout automatically
+on launch and after window resizing. Details and the event log remain independently scrollable.
 
 Choose **Settings** at the top right of the desktop window, beside **Details**.
 Under **Basic settings**, choose **Dark** or **Light** display mode. The change
