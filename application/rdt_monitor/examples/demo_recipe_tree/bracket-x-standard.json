@@ -1,0 +1,53 @@
+{
+  "specimen_id": "DEMO-TRAINING-SERIAL",
+  "recipe": {
+    "synchronization": {
+      "stable_frames": 2,
+      "max_gap_seconds": 0.2,
+      "cycle_timeout_seconds": 4.0
+    },
+    "marker": {
+      "left": 0.05,
+      "top": 0.1,
+      "width": 0.1,
+      "height": 0.1
+    },
+    "position": {
+      "left": 0.8,
+      "top": 0.1,
+      "width": 0.1,
+      "height": 0.1
+    },
+    "brightness": 180,
+    "absent_fraction": 0.2,
+    "present_fraction": 0.8
+  },
+  "image_width": 960,
+  "image_height": 540,
+  "schema_version": 6,
+  "detector": {
+    "model_file": "detector-80790dc4fd0046e3bae8e8b9940b8c20/model.xml",
+    "model_sha256": "5633b311d49123e6212bf7e7311b19e99ed03981b4f76ac0554843b2d5292c35",
+    "weights_sha256": "e2e2033ae7e19d680599d4eb0a1359a2b48ec5baac75066c317fbf85159c54ef",
+    "region": {
+      "left": 0.2,
+      "top": 0.2,
+      "width": 0.5,
+      "height": 0.5
+    },
+    "threshold": 0.45,
+    "review_margin": 0.05
+  },
+  "profile": {
+    "family_id": "09b7e213bb5e4b7098b71337c5ed78fb",
+    "revision": "a0751ec5e8954c379e80b0133f85a0df",
+    "name": "DEMO \u00b7 Bracket X - standard",
+    "notes": "DEMO ONLY: synthetic metadata and an untrained mean-score model. Do not use for inspection."
+  },
+  "specimen": {
+    "name": "Bracket X",
+    "batch": "DEMO-LOT-X",
+    "family": "DEMO \u00b7 Bracket assembly",
+    "article_number": "000000200001"
+  }
+}

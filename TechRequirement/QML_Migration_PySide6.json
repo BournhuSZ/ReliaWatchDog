@@ -1,0 +1,16 @@
+{
+  "recorded_date": "2026-10-30",
+  "qt_binding": "PySide6 Essentials",
+  "binding_version": "6.11.3",
+  "qt_runtime": "6.11.3",
+  "lock_sha256": "9fc0819cd742e8229898aa2e90667475b241cefa7dcf1d6d280ab1600d5f401e",
+  "packages": {
+    "PySide6-Essentials": "6.11.3",
+    "shiboken6": "6.11.3",
+    "numpy": "2.4.6",
+    "opencv-python-headless": "4.14.0.94",
+    "openvino": "2026.4.1",
+    "pytest": "9.1.1",
+    "ruff": "0.17.0"
+  }
+}

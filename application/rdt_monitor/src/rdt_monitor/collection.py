@@ -304,6 +304,19 @@ class CandidateCollection:
         """Start the single-use writer; never initiate training."""
         self._thread.start()
 
+    def try_document(self) -> CollectionDocument | None:
+        """Return immutable progress when available, without waiting on writer persistence.
+
+        Returns:
+            CollectionDocument | None: Current snapshot, or None while the writer owns the lock.
+        """
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            return self._document
+        finally:
+            self._lock.release()
+
     def capture(self, image: Image, result: SyncResult) -> None:
         """Queue a distinct valid cycle image without file I/O in the camera worker.
 

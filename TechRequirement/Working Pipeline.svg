@@ -63,12 +63,12 @@
     <text x="88" y="309" class="node-copy muted">detector binding, specimen identity</text>
     <text x="88" y="330" class="node-mono muted">recipes.py</text>
   </a>
-  <a href="../application/rdt_monitor/src/rdt_monitor/app.py" aria-label="Open monitor UI implementation">
+  <a href="../application/rdt_monitor/src/rdt_monitor/presentation.py" aria-label="Open shared-controller QML presentation implementation">
     <rect x="354" y="239" width="235" height="104" rx="10" class="node-live"/>
-    <text x="374" y="267" class="node-title ink">PyQt monitor UI</text>
+    <text x="374" y="267" class="node-title ink">QML / Widgets UI</text>
     <text x="374" y="291" class="node-copy muted">Load → review → confirm Start</text>
-    <text x="374" y="309" class="node-copy muted">Polls worker queues and renders state</text>
-    <text x="374" y="330" class="node-mono muted">app.py · MainWindow</text>
+    <text x="374" y="309" class="node-copy muted">Renders controller updates and state</text>
+    <text x="374" y="330" class="node-mono muted">presentation.py / app.py</text>
   </a>
   <a href="../application/rdt_monitor/src/rdt_monitor/camera.py" aria-label="Open camera worker implementation">
     <rect x="638" y="239" width="252" height="104" rx="10" class="node-live"/>
@@ -116,8 +116,8 @@
   <a href="../application/rdt_monitor/src/rdt_monitor/lifecycle.py" aria-label="Open run lifecycle implementation">
     <rect x="1238" y="389" width="300" height="104" rx="10" class="node-live"/>
     <text x="1258" y="417" class="node-title ink">RunLifecycle</text>
-    <text x="1258" y="441" class="node-copy muted">Creates a cycle ticket; tracks inspected,</text>
-    <text x="1258" y="459" class="node-copy muted">uninspected, degraded, and stop state</text>
+    <text x="1258" y="441" class="node-copy muted">Controller admits cycle tickets; tracks</text>
+    <text x="1258" y="459" class="node-copy muted">inspection, degraded, and stop state</text>
     <text x="1258" y="480" class="node-mono muted">lifecycle.py</text>
   </a>
   <path d="M764 343 V365 H620 V441 H593" class="edge"/>

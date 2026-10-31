@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """Bounded replay transport and visual-marker experiments; never defect assessment."""
 
 from collections.abc import Callable
@@ -220,6 +223,15 @@ class ReplayRecipe:
         if fraction <= self.absent_fraction:
             return MarkerState.ABSENT
         return MarkerState.AMBIGUOUS
+
+
+def fixture_recipe() -> ReplayRecipe:
+    """Return explicit synthetic-fixture settings, never production defaults.
+
+    Returns:
+        ReplayRecipe: Unqualified replay settings for the supplied fixture.
+    """
+    return ReplayRecipe(SyncConfig(2, 0.2, 4), Region(0.05, 0.1, 0.1, 0.1), Region(0.8, 0.1, 0.1, 0.1))
 
 
 @dataclass(frozen=True)

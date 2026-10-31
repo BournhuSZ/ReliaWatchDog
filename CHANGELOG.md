@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- RDT QML current-run Pass/Fail/Review summary with a stacked distribution chart and evidence-backed yield; uninspected/pending cycles and evidence failures do not inflate success. New outcome totals remain distinct from the existing latched alarm.
+- RDT QML View menu option to lock the current window size and restore its previous resizing limits when unchecked; the GUI lock also protects this option.
+- RDT QML station header with a live local timestamp/time zone, Windows-session user, labeled monitoring-status light and Settings panel for appearance, ROI map display and GUI locking.
+- RDT QML collection/review/training with automatic exact-cycle and explicit manual capture, immutable ROI/session settings, hash-verified candidate review, undamaged confirmation, separate-process PatchCore training/log/cancel, offline export inspection and explicit family recipe binding. No model is activated automatically.
+- RDT QML frozen camera setup with Basic/Advanced settings, graphical/numeric Start/Position regions, appearance references, read-only trained inspection ROI, specimen metadata, recipe revisions and explicit confirmation. The shared controller retains setup persistence, recipe/source validation and exact-cycle inspection ownership.
+- RDT QML local recording replay with selection-before-Start, replay-only synchronization settings, atomic Apply/Cancel, asynchronous Stop and explicit source-time/NOT LIVE labels. Replay reuses the existing decoder/controller, stays counting-only and remains isolated from live detector recipes.
+- RDT QML offline image inspection with background import/exported-model inference, graphical/numeric ROI editing, shared light/dark colors, exact-source heatmaps and manual PNG snapshots. Input changes and close invalidate stale results; live counters, verdicts, recipes and evidence stay independent.
+- Optional `rdt-monitor-qml` interface with confirmed native setup, recipe loading, Start/Stop, exact-cycle ROI/heatmap, evidence-qualified verdicts, independent fault/latch indicators, synthetic diagnostics and asynchronous close. The standard monitor retains collection/training, its offline tool and recording replay selection.
 - RDT desktop toolbar Settings button with a Basic settings dialog and persistent light/dark display preference, separate from inspection recipes.
 - RDT camera setup now has Basic and Advanced tabs, named family recipes, specimen name/batch metadata, model-preserving marker adjustments, and frozen per-run setup snapshots. New reusable recipe revisions preserve previous files and share existing detector bundles.
 - RDT shows the latest exact-cycle inspection ROI with an anomaly heatmap below monitoring controls, refreshes it after each cycle result and outlines the recipe inspection ROI on the live camera preview.
@@ -26,6 +34,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- RDT QML follows the supplied gui1.0 layout: responsive branding/specimen/camera/session header, saved part/model metadata with a compact actual-serial field, lock switch inside the session header, right-column alerts and Event log/Summary/ROI footer order.
+- RDT QML Camera source and Specimen & recipe cards align label/value/action rows and action baselines; the summary adapts to short alarm-bearing windows while keeping monitoring controls visible.
+- RDT QML moves Offline inspection, Open results and Settings to their Tools/File/View menus and replaces the GUI-lock button with synchronized on/off switches, keeping the front switch available to unlock.
+- RDT QML merges camera connect/disconnect into one state-aware action and adds a session-local GUI lock. Locking blocks operational controls, menus, shortcuts and window closing until Unlock GUI is clicked, while background monitoring and display updates continue.
+- RDT QML provides a File/Edit/View/Tools/Help menu bar for secondary actions while keeping camera, specimen/recipe setup, offline inspection, results and Start/Stop on the front panel. Shared actions align menu and button behavior. Refined spacing and empty-state guidance preserve the existing semantic dark/light palette.
+- RDT QML collection progress uses immutable nonblocking writer snapshots, avoiding routine GUI waits on metadata persistence while preserving capture and saved-file semantics. All GUI workflows now have QML implementations; the Widgets launcher remains the default fallback pending workstation acceptance.
+- RDT QML and Widgets verdicts share semantic light/dark colors. Light-mode verdict text, Start hover and scoped styling, disabled Stop controls and keyboard focus have contrast and native layout regression coverage.
+- RDT camera/replay commands, setup commit, bounded source/result polling and asynchronous disconnect/close now use the shared controller. The existing Widgets interface is ported to PySide6 Essentials with its own Qt 6.11 lockfile.
+- RDT run accounting, cycle-result validation, defect latching and stop finalization now share a Qt-independent controller as the first QML migration increment; the existing PyQt6 Widgets workflow remains available.
 - RDT inspection ROI and monitoring columns stay aligned during resizing and splitter drags; wider splitter targets, consistent evidence headings, themed horizontal scrollbars and light-mode disabled controls improve desktop geometry and readability.
 - RDT desktop menus, header and camera controls use aligned compact sizing, clearer action/status grouping, and consistent light/dark hover, selected and focus states.
 - RDT recipe loading preserves the current specimen serial instead of restoring the training specimen's serial. Station-wide authorization and production qualification remain pending.
@@ -37,6 +54,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- RDT replay thread startup failures finalize run admission instead of leaving the shared controller busy; both interfaces surface the failure.
+- RDT evidence column alignment is recalculated immediately after resizing or splitter movement; camera connection metadata is initialized before the first UI timer tick. Live result settlement rejects stale workers and mismatched cycle identities without consuming a valid ticket.
 - RDT startup window fits the available screen and taskbar area instead of enforcing a 1024 x 768 minimum; short windows retain access to monitoring actions through a scrollable control column.
 - RDT recipe Load/Save dialogs now default to a single repository-level recipes directory instead of training output folders or unspecified locations.
 - RDT recipe loading now distinguishes counting-only and model-bound recipes, retains selected recipe identity across camera connection/start, exposes marker/model/ROI details, rejects missing bundled models, and no longer falsely logs detector unavailability while live inference is pending.

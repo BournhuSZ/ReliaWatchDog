@@ -299,3 +299,24 @@ def test_invalid_band_does_not_create_bundle_or_recipe(tmp_path, stored):
         save_inspection_recipe(tmp_path / "invalid.json", stored, model, Region(0, 0, 1, 1), 0.01, 0.05)
     assert not list(tmp_path.glob("detector-*"))
     assert not (tmp_path / "invalid.json").exists()
+
+
+def test_uut_family_and_article_number_round_trip(tmp_path, stored):
+    from uuid import uuid4
+
+    from rdt_monitor.recipes import RecipeProfile, SpecimenDetails
+
+    path = tmp_path / "uut.json"
+    original = StoredRecipe(
+        "serial",
+        stored.recipe,
+        stored.image_width,
+        stored.image_height,
+        profile=RecipeProfile(uuid4().hex, uuid4().hex, "Family recipe"),
+        specimen=SpecimenDetails("Part", "Batch", "UUT family", "001234567890"),
+    )
+    save_recipe(path, original)
+    assert load_recipe(path) == original
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 6
+    with pytest.raises(ValueError, match="12 digits"):
+        SpecimenDetails(article_number="123")

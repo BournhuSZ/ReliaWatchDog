@@ -10,7 +10,7 @@ requires-python = ">=3.11,<3.15"
 dependencies = [
     "numpy>=1.26,<3",
     "opencv-python-headless>=4.10,<5",
-    "PyQt6>=6.7,<7",
+    "pyside6-essentials>=6.11,<6.12",
 ]
 
 [project.optional-dependencies]
@@ -18,6 +18,7 @@ inference = ["openvino>=2025,<2027"]
 
 [project.scripts]
 rdt-monitor = "rdt_monitor.app:main"
+rdt-monitor-qml = "rdt_monitor.qml_app:main"
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1"]

@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-31",
+  "scope": "Camera source and Specimen & recipe geometry; new current-run summary chart",
+  "method": "Impeccable native-interface polish and manual source/render audit adapted to Windows Qt Quick. No web detector or mobile-platform conformance claim.",
+  "context": {
+    "engine": "Context command could not create the personal engine cache in the sandbox; followed the documented direct-context fallback.",
+    "authority": "Existing source, TechRequirement/design direction.md, shared palette and fresh native renders. PRODUCT.md and DESIGN.md are absent.",
+    "preserved": "Semantic light/dark colors, menus, lock switch, fixed-size menu, camera admission, evidence rules and latched defect alarm."
+  },
+  "polish": {
+    "before": [
+      "Specimen identity and recipe values did not share an explicit label/value grid.",
+      "Camera controls had little spare horizontal space for label/status separation.",
+      "No cumulative evidence-backed Pass/Fail/Review summary or yield distribution existed."
+    ],
+    "after": [
+      "Equal-height setup cards; explicit camera label, 76-pixel specimen/recipe label column and 110-pixel recipe-action column.",
+      "Connection and recipe buttons share their vertical baseline; serial and recipe values share their horizontal origin.",
+      "Current-run summary has labeled Pass/Fail/Review counts, a semantic stacked chart and explicit yield denominator.",
+      "A dense summary keeps the chart contained when alarms compress the minimum-height window. Start/Stop remain pinned."
+    ],
+    "render_defects_fixed": [
+      "Qt maps an absent percentage to undefined; empty yield now checks the denominator and finite value instead of rendering NaN%.",
+      "An alarm could compress the bottom row to 88 pixels; the summary now combines counts/yield and hides redundant footer/legend rows in that dense case."
+    ]
+  },
+  "accounting": {
+    "pass": "No defect detected with confirmed saved evidence.",
+    "fail": "Defect detected with confirmed saved evidence; distinct from the latched alarm count.",
+    "review": "Needs review with confirmed saved evidence; never added to Pass.",
+    "yield": "100 * Pass / (Pass + Fail + Review); an empty denominator is shown as a dash.",
+    "excluded": "Pending, uninspected, counting-only and evidence-failed cycles.",
+    "lifetime": "Counters are maintained at exact-once lifecycle settlement, survive Stop/recovery in the same run and reset on new Start. No derivation from the bounded event log or retained result history.",
+    "alarm": "Existing latched defect accounting is unchanged, including its behavior when evidence fails."
+  },
+  "audit": {
+    "platform_verdict": "Pass for inspected paths: native Qt controls, consistent setup geometry, contained chart, direct monitoring controls and preserved menus/lock behavior.",
+    "dimensions": [
+      {"name": "Accessibility", "score": 3, "evidence": "Text equivalents for every count, explicit yield formula, chart accessibility name, focus/input conventions preserved. Full Narrator and user text-scale acceptance remain unverified."},
+      {"name": "Performance", "score": 3, "evidence": "Constant-size outcome counters and three chart segments; no plotting dependency, history scan, new polling timer or frame transport. No new endurance/latency benchmark claimed."},
+      {"name": "Theming", "score": 4, "evidence": "All new surfaces/text/chart colors use the existing semantic tokens. Light/dark renders and existing palette contrast checks cover the applied vocabulary."},
+      {"name": "Desktop conformance", "score": 4, "evidence": "Standard label/value/action rows, Qt inputs and menus; pinning and lock semantics preserved. Summary is read-only and does not change verdicts or models."},
+      {"name": "Window adaptivity", "score": 3, "evidence": "960x640, 1280x800 and 1440x900; long specimen strings, empty/populated summaries and short-window latched alarms. OS DPI/large-font testing remains workstation acceptance."}
+    ],
+    "score": 17,
+    "maximum": 20,
+    "rating": "Good, bounded native software verification",
+    "remaining_findings": [
+      {"severity": "P2", "category": "Accessibility/adaptivity", "location": "qml/Main.qml and qml/components/RunSummary.qml", "issue": "The established fixed logical-pixel font/control sizing has no explicit user text-scale control.", "impact": "Large-text users may need additional accommodation beyond automatic Qt DPI scaling.", "recommendation": "Validate target Windows DPI/text settings and Narrator; use impeccable adapt/harden if clipping or reading-order defects are observed."}
+    ],
+    "intentional_tradeoffs": [
+      "The dense summary leaves pending/uninspected totals in Monitoring control; its chart description and yield tooltip retain the denominator explanation.",
+      "The event log narrows beside the summary and elides detail text; hover retains the full detail and cycle numbers remain in the event model."
+    ],
+    "no_outstanding_p0_or_p1_in_inspected_scope": true
+  },
+  "verification": {
+    "native_captures": 20,
+    "tests": {"passed": 618, "skipped": 2, "failures": 0, "total": 620},
+    "groups": {"backend": {"passed": 323, "skipped": 2}, "qml": {"passed": 132}, "widgets": {"passed": 163}},
+    "themes": ["light", "dark"],
+    "sizes": [[960, 640], [1280, 800], [1440, 900]],
+    "scenarios": ["empty", "mixed", "all-pass", "all-fail", "review-only", "counting-only"],
+    "data": "Populated renders use an explicitly labeled synthetic lifecycle ledger. No physical camera, model inference or real evidence files were used for visual QA.",
+    "regressions": "Missing evidence, duplicate settlement, out-of-order outcomes, pending timeout, cumulative totals beyond 600 cycles, new-run reset and native top-card/chart geometry.",
+    "artifacts": "application/rdt_monitor/dist/migration-qml-complete/gui-run-summary",
+    "junit": ["backend-junit.xml", "qml-junit.xml", "widgets-junit.xml"],
+    "runtime_warnings": "No QML warnings in the native scenario renders or geometry tests."
+  }
+}

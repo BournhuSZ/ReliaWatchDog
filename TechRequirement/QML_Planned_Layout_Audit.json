@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-31",
+  "reference": "User-supplied gui1.0.png",
+  "clarification": "User selected a compact actual-specimen serial field inside Specimen & recipe.",
+  "implemented": [
+    "Wide header: branding, Specimen & recipe, Camera source, Station session.",
+    "At widths below 1280 logical pixels, branding wraps above the setup cards.",
+    "Specimen/recipe includes serial input, saved recipe name, part name/batch and model type/hash/threshold/review margin.",
+    "Lock switch is in the Station session header and remains independent of the locked workspace.",
+    "Warnings and latched alarm are above the latest inspection in the right-column scroller; Start/Stop stay pinned.",
+    "Bottom row: Event log, Run summary, Latest inspection ROI."
+  ],
+  "data_contract": {
+    "identity": "The actual operator-entered serial remains separate from the recipe's training specimen identity.",
+    "part": "Only saved specimen name/batch are presented; absent metadata is Not recorded.",
+    "model": "OpenVINO IR format, stored SHA-256 prefix, threshold and review margin; full metadata in hover text. No model architecture is invented.",
+    "replay": "A retained live recipe detector is explicitly inactive during counting-only replay.",
+    "unchanged": "Camera ownership, setup confirmation, evidence validity, inspection verdicts, yield accounting, lock semantics and fixed-window-size behavior."
+  },
+  "verification": {
+    "passed": 179,
+    "failures": 0,
+    "scope": "All 135 QML integration cases plus 44 semantic palette cases.",
+    "visual_captures": 12,
+    "themes": ["light", "dark"],
+    "sizes": [[960, 640], [1280, 800], [1440, 997]],
+    "geometry": "Top card order/equal heights, responsive branding placement, header lock containment, metadata/input bounds, footer order, right-column alert placement and pinned controls.",
+    "metadata": "Tests cover saved name/batch, missing fields, model digest/threshold, independent actual serial and replay with a retained detector.",
+    "runtime": "No QML warnings in native renders or geometry tests.",
+    "style": "Ruff and formatting pass for all 44 source/test Python files.",
+    "artifacts": "application/rdt_monitor/dist/migration-qml-complete/gui-planned-layout"
+  },
+  "manual_native_audit": {
+    "method": "Direct source/native-render review following Impeccable polish principles. The context engine remains unavailable in the sandbox; no web detector or mobile-platform audit is claimed.",
+    "result": "No outstanding P0/P1 issue found in inspected layout and interaction paths.",
+    "intentional_behavior": "Long recipe/model metadata elides on narrow cards and is fully available through hover text. Long messages/result content scroll above the pinned monitoring controls.",
+    "remaining_acceptance": "Target-PC DPI/large-text, Narrator, hardware and qualified-model acceptance remain unverified.",
+    "fixture_disclosure": "Populated captures use an explicitly labeled generated preview, synthetic part metadata and an actual contract graph with real hashes. No physical camera, model fit or inference was used."
+  }
+}

@@ -1,7 +1,11 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 """Offline exported-model inspection; not qualified monitoring or evidence."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from hashlib import sha256
 from importlib import import_module
 from math import isfinite
 from pathlib import Path
@@ -249,13 +253,15 @@ class ImageImportWorker:
 
     Args:
         path (Path): Explicit image filename selected by the operator.
+        expected_sha256 (str | None): Candidate integrity hash, when reviewing collected images.
     """
 
     max_bytes = 128 * 1024 * 1024
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, expected_sha256: str | None = None) -> None:
         self.results: Queue[Image | DetectionFailure] = Queue(maxsize=1)
         self._path = path
+        self._expected_sha256 = expected_sha256
         self._thread = Thread(target=self._run, name="rdt-image-import", daemon=True)
 
     @property
@@ -283,6 +289,8 @@ class ImageImportWorker:
                 encoded = source.read(self.max_bytes + 1)
             if len(encoded) > self.max_bytes:
                 raise ValueError("Image file exceeds the 128 MiB import limit")
+            if self._expected_sha256 is not None and sha256(encoded).hexdigest() != self._expected_sha256:
+                raise ValueError("Candidate image changed; reload and review the collection")
             image = cv2.imdecode(np.frombuffer(encoded, dtype=np.uint8), cv2.IMREAD_COLOR)
             if image is None or image.size == 0:
                 raise ValueError("Selected file is not a readable image")

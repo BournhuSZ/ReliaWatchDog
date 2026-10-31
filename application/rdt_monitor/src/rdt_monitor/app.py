@@ -17,19 +17,20 @@ from uuid import uuid4
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import (
+from PySide6.QtCore import (
     QPointF,
     QProcess,
     QProcessEnvironment,
+    QRect,
     QRectF,
     QSettings,
     QSignalBlocker,
     Qt,
     QTimer,
     QUrl,
-    pyqtSignal,
+    Signal,
 )
-from PyQt6.QtGui import (
+from PySide6.QtGui import (
     QCloseEvent,
     QColor,
     QDesktopServices,
@@ -43,7 +44,7 @@ from PyQt6.QtGui import (
     QPen,
     QResizeEvent,
 )
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QCheckBox,
@@ -85,6 +86,7 @@ from rdt_monitor.collection import (
     local_file,
     metadata_digest,
 )
+from rdt_monitor.controller import InspectionPoll, MonitorController, ObservationUpdate, SourcePoll
 from rdt_monitor.detection import (
     DetectionFailure,
     DetectionResult,
@@ -92,9 +94,11 @@ from rdt_monitor.detection import (
     ImageImportWorker,
     InspectionWorker,
 )
-from rdt_monitor.domain import InspectionRecord, RunRecord, SyncConfig, SyncResult, SyncState
-from rdt_monitor.lifecycle import CycleTicket, InspectionOutcome, Readiness, RunLifecycle, RunMode, RunState
+from rdt_monitor.domain import SyncConfig, SyncResult, SyncState
+from rdt_monitor.lifecycle import InspectionOutcome, Readiness, RunMode, RunState
 from rdt_monitor.live import LiveInspection
+from rdt_monitor.palette import colors as display_colors
+from rdt_monitor.paths import INSPECTION_DIRECTORY, RECIPE_DIRECTORY
 from rdt_monitor.recipes import (
     RecipeProfile,
     SpecimenDetails,
@@ -102,9 +106,9 @@ from rdt_monitor.recipes import (
     load_recipe,
     save_inspection_recipe,
     save_managed_recipe,
-    save_run_setup,
     specimen_setup,
 )
+from rdt_monitor.rendering import inspection_overlay as _inspection_overlay
 from rdt_monitor.replay import (
     Image,
     MarkerAppearance,
@@ -112,12 +116,8 @@ from rdt_monitor.replay import (
     Region,
     ReplayPipeline,
     ReplayRecipe,
-    SyntheticSource,
-    VideoSource,
+    fixture_recipe,
 )
-
-RECIPE_DIRECTORY = Path(__file__).resolve().parents[4] / "recipes"
-INSPECTION_DIRECTORY = Path(__file__).resolve().parents[4] / "inspection-results"
 
 
 def _fit_dialog_to_screen(
@@ -138,19 +138,6 @@ def _fit_dialog_to_screen(
     dialog.move(available.center() - dialog.rect().center())
 
 
-def _inspection_overlay(result: DetectionResult) -> Image:
-    image = result.source_image.copy()
-    left, top, right, bottom = result.settings.region.pixels(image)
-    colors = np.zeros((bottom - top, right - left, 3), dtype=np.float32)
-    colors[..., 2] = 255
-    colors[..., 1] = 115 * (1 - result.anomaly_map)
-    alpha = (result.anomaly_map * 0.6)[..., None]
-    image[top:bottom, left:right] = np.clip(
-        image[top:bottom, left:right] * (1 - alpha) + colors * alpha, 0, 255
-    ).astype(np.uint8)
-    return image
-
-
 class _VerdictLabel(QLabel):
     """Render the latest inspection as a static signal, never a station-health claim."""
 
@@ -158,14 +145,20 @@ class _VerdictLabel(QLabel):
         return self.minimumHeight()
 
     def paintEvent(self, event: QPaintEvent) -> None:
-        colors = {"grey": "#A7B4C4", "green": "#4ADE80", "yellow": "#FACC15", "red": "#FB7185"}
+        tokens = display_colors(QApplication.instance().property("display_mode") == "light")
+        colors = {
+            "grey": tokens["neutral"],
+            "green": tokens["normal"],
+            "yellow": tokens["review"],
+            "red": tokens["defect"],
+        }
         color = str(self.property("verdict_color") or "grey")
         foreground = QColor(colors[color])
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         diameter = min(self.width() - 16, self.height() - 32, 176)
         ring = QRectF((self.width() - diameter) / 2, 5, diameter, diameter)
-        painter.setBrush(QColor(str(self.property("surface_color") or "#09131C")))
+        painter.setBrush(QColor(tokens["verdictSurface"]))
         painter.setPen(QPen(foreground, 2.5))
         painter.drawEllipse(ring)
         center = ring.center()
@@ -214,18 +207,9 @@ class _VerdictLabel(QLabel):
         )
         font.setPixelSize(12)
         painter.setFont(font)
-        painter.setPen(QColor("#A7B4C4"))
+        painter.setPen(QColor(tokens["secondary"]))
         detail = self.text().partition(" - ")[0] if self.text().startswith("Cycle ") else "No inspection result"
         painter.drawText(QRectF(0, ring.bottom() + 6, self.width(), 20), Qt.AlignmentFlag.AlignCenter, detail)
-
-
-def fixture_recipe() -> ReplayRecipe:
-    """Return explicit synthetic-fixture settings, never production defaults.
-
-    Returns:
-        ReplayRecipe: Unqualified replay settings for the supplied fixture.
-    """
-    return ReplayRecipe(SyncConfig(2, 0.2, 4), Region(0.05, 0.1, 0.1, 0.1), Region(0.8, 0.1, 0.1, 0.1))
 
 
 class LiveView(QWidget):
@@ -326,8 +310,8 @@ class LiveView(QWidget):
 class RegionEditor(LiveView):
     """Frozen-image region editor with source-aligned drawing, moving, and resizing."""
 
-    regionChanged = pyqtSignal(int, object)
-    selectionChanged = pyqtSignal(int)
+    regionChanged = Signal(int, object)
+    selectionChanged = Signal(int)
 
     def __init__(self) -> None:
         super().__init__()
@@ -557,7 +541,7 @@ class ReplaySettings(QDialog):
     """
 
     def __init__(
-        self, recipe: ReplayRecipe, parent: QWidget, *, camera_image: QImage | None = None, specimen_id: str = ""
+        self, recipe: ReplayRecipe, parent: QWidget | None, *, camera_image: QImage | None = None, specimen_id: str = ""
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Cycle synchronization setup" if camera_image is not None else "Replay settings")
@@ -1048,7 +1032,7 @@ class ReplaySettings(QDialog):
                 marker_reference, position_reference = self._loaded_references
             else:
                 converted = self.preview._image.convertToFormat(QImage.Format.Format_BGR888)
-                pixels = np.frombuffer(converted.constBits().asstring(converted.sizeInBytes()), dtype=np.uint8)
+                pixels = np.frombuffer(converted.constBits(), dtype=np.uint8)
                 pixels = pixels.reshape(converted.height(), converted.bytesPerLine())[:, : converted.width() * 3]
                 source = pixels.reshape(converted.height(), converted.width(), 3)
                 marker_reference = MarkerAppearance.capture(source, regions[0])
@@ -1696,7 +1680,7 @@ class TrainingCollectionDialog(QDialog):
 
     def _refresh(self) -> None:
         busy = self._collection is not None or self._training() or self._review_worker is not None
-        camera = self.owner.camera
+        camera = self.owner.controller.camera
         trial = camera.trial if camera is not None else None
         result = trial.result if trial is not None else None
         streaming = camera is not None and camera.status.state == "Streaming"
@@ -1705,9 +1689,9 @@ class TrainingCollectionDialog(QDialog):
         ready = streaming and (
             bool(self.owner.specimen.text().strip())
             if manual
-            else trial is not None and not lost and self.owner.run_record is not None
+            else trial is not None and not lost and self.owner.controller.run_record is not None
         )
-        if self.owner._live_inspection is not None:
+        if self.owner.controller.worker is not None:
             ready = False
         self.synchronize_button.setVisible(not manual)
         self.synchronize_button.setEnabled(bool(not manual and streaming and not busy and (trial is None or lost)))
@@ -1718,7 +1702,7 @@ class TrainingCollectionDialog(QDialog):
             else "Visually observed cycles: unavailable"
         )
         progress = self._collection.document if self._capturing() else self._document
-        frame = self.owner._last_camera_frame
+        frame = self.owner.controller.last_frame
         fresh = frame is not None and 0 <= monotonic() - frame.received_at <= self.MANUAL_FRAME_MAX_AGE_SECONDS
         if manual:
             declared = len(progress.records) if progress is not None else 0
@@ -1738,7 +1722,7 @@ class TrainingCollectionDialog(QDialog):
             reason = "Manual / click Capture cycle after each cycle"
         elif not manual and lost:
             reason = f"Synchronization lost / {result.reason} / restart required"
-        elif not manual and (trial is None or self.owner.run_record is None):
+        elif not manual and (trial is None or self.owner.controller.run_record is None):
             reason = "Synchronization not configured"
         elif self._source is None:
             reason = "Camera frame not selected"
@@ -1797,7 +1781,7 @@ class TrainingCollectionDialog(QDialog):
         if not self.synchronize_button.isEnabled():
             return
         self.owner.start_marker_trial()
-        run = self.owner.run_record
+        run = self.owner.controller.run_record
         if run is not None:
             self.identity.setText(f"Specimen: {run.specimen_id} | Run: {run.run_id}")
         self._refresh()
@@ -1821,7 +1805,7 @@ class TrainingCollectionDialog(QDialog):
     def _use_camera(self) -> None:
         if self._collection is not None or self._training() or self._review_worker is not None:
             return
-        frame = self.owner._last_camera_frame
+        frame = self.owner.controller.last_frame
         if frame is None:
             return
         self._document = None
@@ -1833,7 +1817,7 @@ class TrainingCollectionDialog(QDialog):
         self._export = None
         self.editor._display_image(self._source)
         self.editor.update()
-        run = self.owner.run_record
+        run = self.owner.controller.run_record
         self.identity.setText(
             f"Specimen: {run.specimen_id} | Run: {run.run_id}" if run is not None else "No synchronization run"
         )
@@ -1872,7 +1856,7 @@ class TrainingCollectionDialog(QDialog):
     def _collect(self) -> None:
         if not self.collect_button.isEnabled() or self._source is None or self._region is None:
             return
-        camera, run = self.owner.camera, self.owner.run_record
+        camera, run = self.owner.controller.camera, self.owner.controller.run_record
         manual = self.cycle_mode.currentData() == "manual"
         if camera is None or (not manual and (camera.trial is None or run is None)):
             return
@@ -1927,7 +1911,7 @@ class TrainingCollectionDialog(QDialog):
         if not self.capture_cycle_button.isEnabled():
             self.fault.setText("Capture unavailable: wait for a fresh camera frame and the previous image to save.")
             return
-        frame = self.owner._last_camera_frame
+        frame = self.owner.controller.last_frame
         collection = self._collection
         if frame is None or collection is None:
             return
@@ -2164,15 +2148,15 @@ class TrainingCollectionDialog(QDialog):
         """Update bounded writer, review and training state without waiting on workers."""
         collection = self._collection
         if collection is not None:
-            camera, run = self.owner.camera, self.owner.run_record
+            camera, run = self.owner.controller.camera, self.owner.controller.run_record
             result = self._attached_trial.result if self._attached_trial is not None else None
             automatic = collection.document.settings.cycle_mode == "auto"
             if (
-                self.owner._closing
+                self.owner.controller.closing
                 or camera is None
                 or camera is not self._capture_camera
                 or camera.status.state != "Streaming"
-                or self.owner._disconnect_after_stop
+                or self.owner.controller.disconnect_after_stop
                 or (
                     automatic
                     and (
@@ -2185,8 +2169,8 @@ class TrainingCollectionDialog(QDialog):
             ):
                 collection.interrupt("Camera/synchronization coverage ended during candidate collection")
             progress = collection.document
-            if not automatic and self._capturing() and self.owner._last_camera_frame is not None:
-                self.editor._display_image(self.owner._last_camera_frame.image)
+            if not automatic and self._capturing() and self.owner.controller.last_frame is not None:
+                self.editor._display_image(self.owner.controller.last_frame.image)
                 self.editor.update()
             self.state.setText(
                 f"Unqualified / {progress.state} / {len(progress.records)} of {progress.settings.target} saved"
@@ -2227,33 +2211,13 @@ class MainWindow(QMainWindow):
         self.resize(1440, 900)
         self.setMinimumSize(960, 640)
         self.recipe = fixture_recipe()
-        self.pipeline: ReplayPipeline | None = None
-        self.camera: CameraPreview | None = None
-        self._camera_recipe: ReplayRecipe | None = None
-        self._loaded_camera_recipe: tuple[StoredRecipe, Path] | None = None
-        self._live_inspection: LiveInspection | None = None
-        self._live_tickets: dict[int, CycleTicket] = {}
-        self._live_defects = 0
-        self._latest_live_cycle = 0
-        self._live_fault = ""
-        self._retired_live: LiveInspection | None = None
-        self._mode = "replay"
+        self.controller = MonitorController()
         self._last_camera_status = ""
         self._last_sync_fault = ""
-        self.run_record: RunRecord | None = None
-        self.lifecycle = RunLifecycle(capacity=128, stop_timeout=3)
-        self._stopping_trial: MarkerTrial | None = None
-        self._disconnect_after_stop = False
-        self._source: str | None = None
-        self._synthetic = False
         self._revision = 1
         self._last_status = ""
-        self._closing = False
-        self._close_requested_at: float | None = None
-        self.inspections: list[InspectionRecord] = []
         self._inspection_dialog: OfflineInspectionDialog | None = None
         self._training_dialog: TrainingCollectionDialog | None = None
-        self._last_camera_frame: CameraFrame | None = None
         central = QWidget()
         central.setObjectName("monitorSurface")
         self.setCentralWidget(central)
@@ -2386,6 +2350,7 @@ class MainWindow(QMainWindow):
         self.camera_connection = QLabel("Disconnected")
         self.camera_connection.setObjectName("statusBadge")
         self.camera_connection.setProperty("status", "offline")
+        self.camera_connection.setProperty("connected", False)
         preview_header.addWidget(self.camera_connection)
         preview_layout.addLayout(preview_header)
         self.frame_label = QLabel("Live view")
@@ -2666,7 +2631,13 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._fit_layout_to_window)
 
     def _align_evidence_column(self) -> None:
-        self._roi_panel.setFixedWidth(self.controls_scroll.width())
+        width = self.controls_scroll.width()
+        self._roi_panel.setFixedWidth(width)
+        # Reallocate the splitter immediately after changing the fixed width;
+        # otherwise Qt can retain the previous child position until its next layout.
+        sizes = self.bottom_splitter.sizes()
+        sizes[-1] = width
+        self.bottom_splitter.setSizes(sizes)
 
     def _fit_layout_to_window(self) -> None:
         """Set stable splitter proportions from the actual Windows client size."""
@@ -2691,11 +2662,13 @@ class MainWindow(QMainWindow):
         )
         self._align_evidence_column()
 
-    def _fit_available_screen(self) -> None:
-        screen = self.screen()
-        if screen is None:
-            return
-        available = screen.availableGeometry().adjusted(16, 16, -16, -48)
+    def _fit_available_screen(self, available: QRect | None = None) -> None:
+        if available is None:
+            screen = self.screen()
+            if screen is None:
+                return
+            available = screen.availableGeometry()
+        available = available.adjusted(16, 16, -16, -48)
         self.setMinimumSize(min(960, available.width()), min(640, available.height()))
         self.resize(min(1440, available.width()), min(900, available.height()))
         self.move(available.center() - self.rect().center())
@@ -2762,7 +2735,7 @@ class MainWindow(QMainWindow):
         self._refresh_operator_status()
 
     def _refresh_operator_status(self) -> None:
-        snapshot = self.lifecycle.snapshot
+        snapshot = self.controller.lifecycle.snapshot
         status = {
             RunState.STOPPED: "Stopped",
             RunState.READY: "Running",
@@ -2771,11 +2744,13 @@ class MainWindow(QMainWindow):
             RunState.RECOVERING: "Needs attention",
             RunState.STOPPING: "Stopping",
         }[snapshot.state]
-        if self.camera is not None and self.camera.status.state == "Fault":
+        if self.controller.camera is not None and self.controller.camera.status.state == "Fault":
             status = "Camera unavailable"
         self.operator_status.setText(status)
-        status_key = "attention" if status in {"Needs attention", "Camera unavailable"} else (
-            "active" if status == "Running" else "offline"
+        status_key = (
+            "attention"
+            if status in {"Needs attention", "Camera unavailable"}
+            else ("active" if status == "Running" else "offline")
         )
         if self.operator_status.property("status") != status_key:
             self.operator_status.setProperty("status", status_key)
@@ -2784,20 +2759,23 @@ class MainWindow(QMainWindow):
         connected = False
         connection = "Disconnected"
         self.preview_title.setText("CAMERA VIEW")
-        if self._mode == "camera" and self.camera is not None:
-            camera = self.camera.status
+        if self.controller.mode == "camera" and self.controller.camera is not None:
+            camera = self.controller.camera.status
             if camera.state == "Streaming":
                 connected = camera.last_received_at is not None and 0 <= monotonic() - camera.last_received_at <= 1
                 connection = "Live" if connected else "Preview stale"
                 self.preview_title.setText("LIVE CAMERA VIEW")
             else:
                 connection = {"Opening": "Connecting", "Fault": "Unavailable"}.get(camera.state, "Disconnected")
-        elif self.pipeline is not None:
-            connection = "Replay" if self.pipeline.alive else "Replay stopped"
-            self.preview_title.setText("SYNTHETIC PREVIEW" if self._synthetic else "RECORDING VIEW")
+        elif self.controller.pipeline is not None:
+            connection = "Replay" if self.controller.pipeline.alive else "Replay stopped"
+            self.preview_title.setText("SYNTHETIC PREVIEW" if self.controller.synthetic else "RECORDING VIEW")
         self.camera_connection.setText(connection)
-        connection_key = "active" if connection in {"Live", "Replay"} else (
-            "attention" if connection in {"Preview stale", "Unavailable", "Replay stopped"} else "offline"
+        self.camera_connection.setProperty("connected", connected)
+        connection_key = (
+            "active"
+            if connection in {"Live", "Replay"}
+            else ("attention" if connection in {"Preview stale", "Unavailable", "Replay stopped"} else "offline")
         )
         if self.camera_connection.property("status") != connection_key:
             self.camera_connection.setProperty("status", connection_key)
@@ -2817,9 +2795,9 @@ class MainWindow(QMainWindow):
             "Video (*.mp4 *.avi *.mov *.mkv);;All files (*)",
         )
         if path:
-            self._mode = "replay"
-            self._source = path
-            self._synthetic = False
+            self.controller.mode = "replay"
+            self.controller.source = path
+            self.controller.synthetic = False
             self.source_label.setText(f"Recording: {Path(path).name}")
             self.source_label.setToolTip(path)
             self.live_view.clear()
@@ -2828,13 +2806,13 @@ class MainWindow(QMainWindow):
     def _fixture(self) -> None:
         if self._busy():
             return
-        self._mode = "replay"
-        self._source = "Synthetic marker fixture / not camera footage"
-        self._synthetic = True
+        self.controller.mode = "replay"
+        self.controller.source = "Synthetic marker fixture / not camera footage"
+        self.controller.synthetic = True
         self.recipe = fixture_recipe()
         self._revision += 1
         self.source_label.setText("Synthetic fixture")
-        self.source_label.setToolTip(self._source)
+        self.source_label.setToolTip(self.controller.source)
         self.run_label.setText(f"No active run | replay-v{self._revision}")
         self.live_view.clear()
         self.start_button.setEnabled(True)
@@ -2848,19 +2826,15 @@ class MainWindow(QMainWindow):
 
     def start_replay(self) -> None:
         """Begin an explicitly unqualified new run only after an operator command."""
-        if self._source is None or self._busy():
+        try:
+            record = self.controller.start_replay(
+                self.specimen.text(), self.recipe, self._revision, factory=ReplayPipeline
+            )
+        except (ValueError, RuntimeError) as error:
+            self._set_notice(str(error))
             return
-        self._mode = "replay"
-        if not self.specimen.text().strip():
-            self._set_notice("Enter a specimen or replay label to start.")
+        if record is None:
             return
-        source = self._source
-        factory = SyntheticSource if self._synthetic else lambda: VideoSource(source)
-        self.run_record = RunRecord(
-            uuid4().hex[:12], self.specimen.text().strip(), f"replay-v{self._revision}", source, datetime.now(UTC)
-        )
-        self.lifecycle.start(self.run_record, mode=RunMode.DEVELOPMENT, readiness=Readiness())
-        self._live_defects = self._latest_live_cycle = 0
         self.roi_view.clear()
         self.roi_caption.setText("Latest inspection ROI - counting only")
         self.live_view.inspection_region = None
@@ -2868,69 +2842,50 @@ class MainWindow(QMainWindow):
         self._show_verdict(InspectionOutcome.UNINSPECTED, "Unknown - Counting only / not inspected")
         self.evidence.setText("Not recorded")
         self.assessment_note.setText("Counting only - not inspected")
-        self.pipeline = ReplayPipeline(factory, self.recipe)
         self.live_view.clear()
         self.cycles.setText("0")
         self.inspected_cycles.setText("Inspected 0 | Uninspected 0")
         self.sync.setText("Waiting for fresh marker transition")
-        self.inspections.clear()
         self._last_status = ""
-        self.run_label.setText(
-            f"Run {self.run_record.run_id} | {self.run_record.specimen_id} | {self.run_record.recipe_version} | locked"
-        )
+        self.run_label.setText(f"Run {record.run_id} | {record.specimen_id} | {record.recipe_version} | locked")
         self._set_notice("")
         self._log("Run started", "Unqualified; no defect assessment or evidence", "0.000 s", 0, "-")
         self._set_running(True)
-        self.pipeline.start()
 
     def stop_replay(self) -> None:
         """Request replay stop without waiting on decoding in the UI thread."""
-        if self.pipeline is not None and self.pipeline.alive:
-            self.lifecycle.request_stop(monotonic())
-            self.pipeline.stop()
+        if self.controller.stop_replay(monotonic()):
             self.health.setText("Stopping")
             self.stop_button.setEnabled(False)
 
     def _set_running(self, running: bool) -> None:
         for control in (self.open_button, self.fixture_button, self.settings_button, self.specimen):
             control.setEnabled(not running)
-        self.start_button.setEnabled(not running and self._source is not None)
+        self.start_button.setEnabled(not running and self.controller.source is not None)
         self.stop_button.setEnabled(running)
         self.camera_index.setEnabled(not running)
         self.connect_button.setEnabled(not running)
         self.disconnect_button.setEnabled(False)
         self.trial_button.setEnabled(False)
-        self.load_recipe_button.setEnabled(not running and not self._closing)
+        self.load_recipe_button.setEnabled(not running and not self.controller.closing)
 
     def _busy(self) -> bool:
-        return (
-            (self._retired_live is not None and not self._retired_live.finished.is_set())
-            or self._stopping_trial is not None
-            or self.lifecycle.snapshot.state != RunState.STOPPED
-            or (self.pipeline is not None and self.pipeline.alive)
-            or (self.camera is not None and self.camera.alive)
-        )
+        return self.controller.busy
 
     def connect_camera(self) -> None:
         """Open the existing Keyence API off-thread without starting inspection."""
-        if self._busy() or self._closing:
+        if not self.controller.connect_camera(self.camera_index.value(), factory=CameraPreview):
             return
-        self._mode = "camera"
         self._last_camera_status = ""
         self._last_sync_fault = ""
-        self._disconnect_after_stop = False
-        self.run_record = None
-        self.inspections.clear()
-        self.camera = CameraPreview(self.camera_index.value())
-        self._last_camera_frame = None
         self.live_view.clear()
         self.cycles.setText("0")
         self.inspected_cycles.setText("Inspected 0 | Uninspected 0")
         self.sync.setText("Unavailable / camera preview only")
         self.source_label.setText(f"Camera | OpenCV index {self.camera_index.value()}")
         self.source_label.setToolTip("Generic OpenCV camera index; manufacturer identity is not verified")
-        if self._loaded_camera_recipe is not None:
-            stored, path = self._loaded_camera_recipe
+        if self.controller.loaded_recipe is not None:
+            stored, path = self.controller.loaded_recipe
             self.run_label.setText(f"{path.name} | {stored.mode_label} | Not started")
             self.run_label.setToolTip(stored.description(path))
         else:
@@ -2942,16 +2897,17 @@ class MainWindow(QMainWindow):
         self._set_notice("")
         self._set_camera_running(True)
         self._log("Camera connect", "Preview only; no inspection", datetime.now(UTC).strftime("%H:%M:%S UTC"), 0, "-")
-        self.camera.start()
 
     def disconnect_camera(self) -> None:
         """Finalize development work before requesting worker-owned camera release."""
-        if self.camera is not None and self.camera.alive:
-            self._disconnect_after_stop = True
-            if self.camera.trial is not None or self._stopping_trial is not None:
-                self.stop_marker_trial()
+        if self.controller.disconnect_camera(monotonic()):
+            if self.controller.stopping_trial is not None:
+                self.sync.setText("Stopping / finalizing development cycles")
+                self.stop_work_button.setEnabled(False)
+                self.trial_button.setEnabled(False)
+                self.load_recipe_button.setEnabled(False)
+                self._finalize_marker_stop()
                 return
-            self.camera.stop()
             self.health.setText("Disconnecting camera")
             self.disconnect_button.setEnabled(False)
             self.trial_button.setEnabled(False)
@@ -2967,27 +2923,23 @@ class MainWindow(QMainWindow):
 
     def load_marker_recipe(self) -> None:
         """Select a stored recipe without requiring a camera or starting a run."""
-        if self._closing or self.lifecycle.snapshot.state != RunState.STOPPED:
+        if self.controller.closing or self.controller.lifecycle.snapshot.state != RunState.STOPPED:
             self._set_notice("Stop the current run before loading a recipe.")
             return
         path, _ = QFileDialog.getOpenFileName(self, "Load recipe", str(RECIPE_DIRECTORY), "JSON recipe (*.json)")
         if not path:
             return
         try:
-            stored = load_recipe(Path(path))
-            if stored.detector is not None:
-                stored.detector.settings(Path(path))
-        except (OSError, ValueError) as error:
+            stored = self.controller.select_recipe(Path(path))
+        except (OSError, ValueError, RuntimeError) as error:
             self._set_notice(f"Recipe not loaded: {error}")
             return
-        self._loaded_camera_recipe = (stored, Path(path))
         self.live_view.inspection_region = stored.detector.region if stored.detector is not None else None
         self.live_view.update()
         self.roi_view.clear()
         self.roi_caption.setText("Latest inspection ROI - no result")
         self.recipe_summary.setText(f"Recipe: {Path(path).name}")
         self.recipe_summary.setToolTip(stored.description(Path(path)))
-        self._camera_recipe = stored.recipe
         name = stored.profile.name if stored.profile is not None else Path(path).stem
         self.recipe_summary.setText(f"Recipe: {name}")
         self.run_label.setText(f"Recipe loaded: {name} | {stored.mode_label} | Not started")
@@ -3001,18 +2953,18 @@ class MainWindow(QMainWindow):
         self._set_notice("")
 
     def _configure_marker_trial(self) -> None:
-        if self._retired_live is not None and not self._retired_live.finished.is_set():
+        if self.controller.retired_worker is not None and not self.controller.retired_worker.finished.is_set():
             self._set_notice("Previous detector is still finishing after Stop; wait before starting a new run.")
             return
         if (
-            self.camera is None
-            or self._closing
-            or self.camera.status.state != "Streaming"
-            or self._stopping_trial is not None
-            or self._disconnect_after_stop
+            self.controller.camera is None
+            or self.controller.closing
+            or self.controller.camera.status.state != "Streaming"
+            or self.controller.stopping_trial is not None
+            or self.controller.disconnect_after_stop
         ):
             return
-        previous = self.camera.trial
+        previous = self.controller.camera.trial
         result = previous.result if previous is not None else None
         if previous is not None and (result is None or result.state != SyncState.LOST):
             return
@@ -3023,98 +2975,49 @@ class MainWindow(QMainWindow):
             self.specimen.setFocus()
             return
         dialog = ReplaySettings(
-            previous.recipe if previous is not None else self._camera_recipe or fixture_recipe(),
+            previous.recipe if previous is not None else self.controller.camera_recipe or fixture_recipe(),
             self,
             camera_image=self.live_view._image,
             specimen_id=self.specimen.text().strip(),
         )
-        if self._loaded_camera_recipe is not None:
-            if not dialog._apply_stored_recipe(*self._loaded_camera_recipe):
+        if self.controller.loaded_recipe is not None:
+            if not dialog._apply_stored_recipe(*self.controller.loaded_recipe):
                 self._set_notice(dialog._error.text())
                 return
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        inspection_recipe = dialog._stored_recipe or self._loaded_camera_recipe
+        inspection_recipe = dialog._stored_recipe or self.controller.loaded_recipe
         try:
-            if inspection_recipe is not None:
-                original, source = inspection_recipe
-                if load_recipe(source) != original:
-                    raise ValueError("Reusable recipe changed during setup; load it again")
-                setup = specimen_setup(
-                    original,
-                    dialog.specimen_id,
-                    dialog.recipe,
-                    SpecimenDetails(dialog.specimen_name.text().strip(), dialog.specimen_batch.text().strip()),
-                )
-            else:
-                setup = StoredRecipe(
-                    dialog.specimen_id,
-                    dialog.recipe,
-                    self.live_view._image.width(),
-                    self.live_view._image.height(),
-                    specimen=SpecimenDetails(dialog.specimen_name.text().strip(), dialog.specimen_batch.text().strip()),
-                )
+            setup = self.controller.prepare_setup(
+                dialog.specimen_id,
+                dialog.recipe,
+                self.live_view._image.width(),
+                self.live_view._image.height(),
+                SpecimenDetails(dialog.specimen_name.text().strip(), dialog.specimen_batch.text().strip()),
+                inspection_recipe,
+            )
         except (OSError, ValueError) as error:
             self._set_notice(f"Setup not accepted: {error}")
             return
         if previous is not None:
             self.stop_marker_trial()
-            if self._stopping_trial is not None:
+            if self.controller.stopping_trial is not None:
                 self._set_notice("Previous development trial is still stopping; wait before starting again.")
                 return
         live = inspection_recipe is not None and inspection_recipe[0].detector is not None
-        run_id = uuid4().hex[:12]
         try:
-            setup_path = save_run_setup(
-                INSPECTION_DIRECTORY,
-                run_id,
-                setup,
-                inspection_recipe[1] if inspection_recipe is not None else None,
+            record = self.controller.start_camera_run(
+                setup, inspection_recipe, INSPECTION_DIRECTORY, worker_factory=LiveInspection
             )
         except (OSError, ValueError) as error:
             self._set_notice(f"Run not started: could not record setup: {error}")
             return
-        worker = None
-        if live:
-            stored, recipe_path = inspection_recipe
-            if stored.detector is not None:
-                worker = LiveInspection(
-                    stored.detector,
-                    recipe_path,
-                    INSPECTION_DIRECTORY / f"run-{run_id}",
-                    output_root=INSPECTION_DIRECTORY,
-                    setup_path=setup_path,
-                )
-                worker.start()
-        try:
-            if worker is None:
-                self.camera.start_trial(dialog.recipe)
-            else:
-                self.camera.start_trial(dialog.recipe, capture=worker.capture)
         except RuntimeError as error:
-            if worker is not None:
-                worker.stop(cancel=True)
             self._set_notice(str(error))
             return
-        self._camera_recipe = dialog.recipe
-        self._loaded_camera_recipe = inspection_recipe
+        worker = self.controller.worker
         self._revision += 1
         self.specimen.setText(dialog.specimen_id)
-        self.run_record = RunRecord(
-            run_id,
-            self.specimen.text().strip(),
-            f"{setup.profile.revision if setup.profile is not None else 'legacy'} / {setup_path.stem}",
-            f"Generic camera index {self.camera_index.value()}",
-            datetime.now(UTC),
-        )
-        self.lifecycle.start(
-            self.run_record,
-            mode=RunMode.EXPERIMENTAL_INSPECTION if live else RunMode.DEVELOPMENT,
-            readiness=Readiness(),
-        )
-        self._live_tickets.clear()
-        self._live_defects = 0
-        self._latest_live_cycle = 0
         self.roi_view.clear()
         self.roi_caption.setText("Latest inspection ROI - no result")
         self.live_view.inspection_region = worker.binding.region if worker is not None else None
@@ -3124,19 +3027,14 @@ class MainWindow(QMainWindow):
             "Unknown - No inspection yet" if live else "Unknown - Counting only / not inspected",
         )
         self.evidence.setText("Not recorded")
-        self._live_inspection = worker
-        self._live_fault = ""
         if live:
             self.assessment_note.setText("UNQUALIFIED live inspection | Waiting for completed cycle")
         else:
             self.assessment_note.setText("Counting only - not inspected")
-        self.inspections.clear()
         self.cycles.setText("0")
         self.inspected_cycles.setText("Inspected 0 | Uninspected 0")
         self.sync.setText("Waiting for fresh marker transition")
-        self.run_label.setText(
-            f"Development run {self.run_record.run_id} | {self.run_record.specimen_id} | settings locked"
-        )
+        self.run_label.setText(f"Development run {record.run_id} | {record.specimen_id} | settings locked")
         self.run_label.setToolTip(
             f"Recipe: synchronization-v{self._revision} | Generic camera index {self.camera_index.value()}"
         )
@@ -3145,7 +3043,7 @@ class MainWindow(QMainWindow):
             self.recipe_summary.setText(f"Recipe: {path.name}")
             self.recipe_summary.setToolTip(stored.description(path))
             self.run_label.setText(
-                f"Run {self.run_record.run_id} | {path.name} | {stored.mode_label} | settings locked"
+                f"Run {self.controller.run_record.run_id} | {path.name} | {stored.mode_label} | settings locked"
             )
             self.run_label.setToolTip(stored.description(path))
         self._last_sync_fault = ""
@@ -3164,16 +3062,8 @@ class MainWindow(QMainWindow):
 
     def stop_marker_trial(self) -> None:
         """Stop intake and asynchronously drain development events before finalizing."""
-        if self.camera is None:
+        if not self.controller.stop_camera_run(monotonic()):
             return
-        if self._stopping_trial is not None:
-            self._finalize_marker_stop()
-            return
-        trial = self.camera.stop_trial()
-        if trial is None:
-            return
-        self._stopping_trial = trial
-        self.lifecycle.request_stop(monotonic())
         self.sync.setText("Stopping / finalizing development cycles")
         self.stop_work_button.setEnabled(False)
         self.trial_button.setEnabled(False)
@@ -3181,41 +3071,24 @@ class MainWindow(QMainWindow):
         self._finalize_marker_stop()
 
     def _finalize_marker_stop(self) -> None:
-        trial = self._stopping_trial
-        if trial is None:
+        self._render_source_poll(self.controller.poll_stopping(monotonic()))
+
+    def _render_source_poll(self, batch: SourcePoll) -> None:
+        for observation in batch.observations:
+            self._render_observation(observation)
+        self._render_inspections(batch.inspections)
+        stopped = batch.stopped
+        if stopped is None:
             return
-        for _ in range(trial.events.maxsize):
-            try:
-                event = trial.events.get_nowait()
-            except Empty:
-                break
-            self._event(event, source_draining=True)
-        worker = self._live_inspection
-        if worker is not None:
-            if trial.stopped:
-                worker.stop()
-            self._poll_live_inspection()
-        quiescent = trial.stopped and trial.events.empty() and (worker is None or worker.finished.is_set())
-        if not self.lifecycle.finish_stop(monotonic(), source_quiescent=quiescent):
-            return
-        if worker is not None:
-            worker.stop(cancel=True)
-            if not worker.finished.is_set():
-                self._retired_live = worker
-            if self.lifecycle.snapshot.stop_timed_out and self._live_tickets:
-                last = max(self._live_tickets.values(), key=lambda ticket: ticket.cycle)
-                if last.cycle >= self._latest_live_cycle:
-                    self._latest_live_cycle = last.cycle
-                    self._show_verdict(
-                        InspectionOutcome.UNINSPECTED, f"Cycle {last.cycle} - Uninspected / finalization timed out"
-                    )
-                    self.evidence.setText("Incomplete")
-                    self.roi_view.clear()
-                    self.roi_caption.setText(f"Cycle {last.cycle} ROI - unavailable")
-            self._live_inspection = None
-            self._live_tickets.clear()
-        snapshot = self.lifecycle.snapshot
-        self._stopping_trial = None
+        if stopped.timed_out_ticket is not None:
+            last = stopped.timed_out_ticket
+            self._show_verdict(
+                InspectionOutcome.UNINSPECTED, f"Cycle {last.cycle} - Uninspected / finalization timed out"
+            )
+            self.evidence.setText("Incomplete")
+            self.roi_view.clear()
+            self.roi_caption.setText(f"Cycle {last.cycle} ROI - unavailable")
+        snapshot = stopped.snapshot
         self.cycles.setText(str(snapshot.observed))
         self.inspected_cycles.setText(f"Inspected {snapshot.inspected} | Uninspected {snapshot.uninspected}")
         self.sync.setText("Stopped / coverage ended")
@@ -3223,7 +3096,7 @@ class MainWindow(QMainWindow):
         self.assessment_note.setText(f"Stopped | {self.assessment_note.text()}")
         self.specimen.setEnabled(True)
         self._last_sync_fault = ""
-        self._set_notice(snapshot.reason if snapshot.stop_timed_out else self._live_fault)
+        self._set_notice(snapshot.reason if snapshot.stop_timed_out else self.controller.fault)
         self._log(
             "Development run stopped",
             snapshot.reason,
@@ -3231,62 +3104,48 @@ class MainWindow(QMainWindow):
             snapshot.observed,
             "-",
         )
-        if self._disconnect_after_stop and self.camera is not None:
-            self.camera.stop()
+        if self.controller.disconnect_after_stop and self.controller.camera is not None:
             self.disconnect_button.setEnabled(False)
 
     def _set_camera_running(self, running: bool) -> None:
         for control in (self.open_button, self.fixture_button, self.settings_button, self.camera_index):
             control.setEnabled(not running)
-        self.specimen.setEnabled(not running or self.run_record is None)
-        self.connect_button.setEnabled(not running and not self._closing)
+        self.specimen.setEnabled(not running or self.controller.run_record is None)
+        self.connect_button.setEnabled(not running and not self.controller.closing)
         self.disconnect_button.setEnabled(running)
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(False)
         self.trial_button.setEnabled(False)
         self.stop_work_button.setEnabled(False)
-        self.load_recipe_button.setEnabled(not self._closing and self.lifecycle.snapshot.state == RunState.STOPPED)
+        self.load_recipe_button.setEnabled(
+            not self.controller.closing and self.controller.lifecycle.snapshot.state == RunState.STOPPED
+        )
 
     def _poll_camera(self) -> None:
-        if self.camera is None:
-            self.load_recipe_button.setEnabled(not self._closing and self.lifecycle.snapshot.state == RunState.STOPPED)
+        if self.controller.camera is None:
+            self.load_recipe_button.setEnabled(
+                not self.controller.closing and self.controller.lifecycle.snapshot.state == RunState.STOPPED
+            )
             return
-        if self._stopping_trial is not None:
+        if self.controller.stopping_trial is not None:
             self._finalize_marker_stop()
-        status = self.camera.status
-        trial = self.camera.trial
+        status = self.controller.camera.status
+        trial = self.controller.camera.trial
         result = trial.result if trial is not None else None
         synchronization_lost = result is not None and result.state == SyncState.LOST
-        self.trial_button.setEnabled(
-            status.state == "Streaming"
-            and self.camera.alive
-            and (trial is None or synchronization_lost)
-            and not self._closing
-            and self._stopping_trial is None
-            and not self._disconnect_after_stop
-            and (self._retired_live is None or self._retired_live.finished.is_set())
-        )
+        commands = self.controller.snapshot()
+        self.trial_button.setEnabled(commands.can_start)
         self.trial_button.setText("Restart" if synchronization_lost else "Start")
-        self.stop_work_button.setEnabled(trial is not None and self._stopping_trial is None and not self._closing)
-        self.load_recipe_button.setEnabled(
-            not self._closing
-            and self.lifecycle.snapshot.state == RunState.STOPPED
-            and self._stopping_trial is None
-            and not self._disconnect_after_stop
-        )
-        self.specimen.setEnabled((trial is None or synchronization_lost) and self._stopping_trial is None)
+        self.stop_work_button.setEnabled(commands.can_stop)
+        self.load_recipe_button.setEnabled(commands.can_load_recipe)
+        self.specimen.setEnabled((trial is None or synchronization_lost) and self.controller.stopping_trial is None)
+        batch = self.controller.poll_camera()
+        self._render_source_poll(batch)
         if trial is not None:
-            for _ in range(trial.events.maxsize):
-                try:
-                    self._event(trial.events.get_nowait())
-                except Empty:
-                    break
             if result is not None:
                 self.cycles.setText(str(result.observed_cycles))
                 self.sync.setText(f"Lost / {result.reason}" if synchronization_lost else result.reason)
-            self._poll_live_inspection()
             if synchronization_lost and not self._last_sync_fault:
-                self.lifecycle.coverage_lost(result.reason)
                 self._log(
                     "Synchronization fault",
                     result.reason,
@@ -3296,16 +3155,11 @@ class MainWindow(QMainWindow):
                 )
                 self._last_sync_fault = result.reason
             if status.state in {"Fault", "Stopped"} and not synchronization_lost:
-                self.lifecycle.coverage_lost(status.reason)
                 self.sync.setText(
                     "Lost / camera coverage ended" if status.state == "Fault" else "Stopped / coverage ended"
                 )
-        try:
-            frame = self.camera.frames.get_nowait()
-        except Empty:
-            frame = None
+        frame = batch.frame
         if frame is not None:
-            self._last_camera_frame = frame
             self.live_view.display_camera(frame, trial.recipe if trial is not None else None)
             self.frame_label.setText(f"Frame {frame.frame_id:06d} | host {frame.received_at:.3f} s")
             if trial is not None:
@@ -3318,7 +3172,7 @@ class MainWindow(QMainWindow):
                     self._recognition_status = "Brightness mode"
             else:
                 self._recognition_status = "Recognition not configured"
-        run_degraded = self.lifecycle.snapshot.state == RunState.DEGRADED
+        run_degraded = self.controller.lifecycle.snapshot.state == RunState.DEGRADED
         health = "Degraded" if (synchronization_lost or run_degraded) and status.state == "Streaming" else status.state
         self.health.setText(f"Camera {health.lower()}" if status.state == "Fault" else health)
         if status.state == "Streaming" and status.last_received_at is not None:
@@ -3337,22 +3191,22 @@ class MainWindow(QMainWindow):
             self._set_notice(f"Synchronization lost: {result.reason}. Review setup before restarting.")
         elif status.state == "Fault":
             self._set_notice(status.reason)
-        elif self.lifecycle.snapshot.stop_timed_out:
-            self._set_notice(self.lifecycle.snapshot.reason)
+        elif self.controller.lifecycle.snapshot.stop_timed_out:
+            self._set_notice(self.controller.lifecycle.snapshot.reason)
         elif run_degraded:
-            self._set_notice(self.lifecycle.snapshot.reason)
-        elif self._live_fault:
-            self._set_notice(self._live_fault)
+            self._set_notice(self.controller.lifecycle.snapshot.reason)
+        elif self.controller.fault:
+            self._set_notice(self.controller.fault)
         else:
             self._set_notice("")
         if status.state in {"Fault", "Stopped"} and status.state != self._last_camera_status:
             self._log(f"Camera {status.state}", status.reason, datetime.now(UTC).strftime("%H:%M:%S UTC"), 0, "-")
         self._last_camera_status = status.state
-        if not self.camera.alive:
-            if self.camera.trial is not None and self._stopping_trial is None:
+        if not self.controller.camera.alive:
+            if self.controller.camera.trial is not None and self.controller.stopping_trial is None:
                 self.stop_marker_trial()
             self._set_camera_running(False)
-            if self._closing:
+            if self.controller.closing:
                 self.close()
 
     def _log(self, event: str, state: str, timestamp: str, cycle: int, frame: str) -> None:
@@ -3360,7 +3214,7 @@ class MainWindow(QMainWindow):
             self.history.removeRow(0)
         row = self.history.rowCount()
         self.history.insertRow(row)
-        run_id = self.run_record.run_id if self.run_record else "-"
+        run_id = self.controller.run_record.run_id if self.controller.run_record else "-"
         for column, value in enumerate((timestamp, run_id, str(cycle), frame, event, state)):
             item = QTableWidgetItem(value)
             item.setToolTip(value)
@@ -3368,23 +3222,26 @@ class MainWindow(QMainWindow):
         self.history.scrollToBottom()
 
     def _event(self, event: SyncResult, *, source_draining: bool = False) -> None:
-        snapshot = self.lifecycle.snapshot
-        if event.inspection_ready and snapshot.record is not None and snapshot.record == self.run_record:
-            try:
-                ticket = self.lifecycle.observe_cycle(
-                    event.observed_cycles,
-                    event.frame_id,
-                    event.timestamp,
-                    source_draining=source_draining or (self._mode == "replay" and snapshot.state == RunState.STOPPING),
-                )
-                if self._live_inspection is not None:
-                    self._live_tickets[event.frame_id] = ticket
-            except (RuntimeError, ValueError) as error:
-                self.lifecycle.coverage_lost(f"Cycle accounting failed: {error}")
-                self._set_notice(f"Cycle accounting failed: {error}")
-                self._log("Cycle accounting fault", str(error), f"{event.timestamp:.3f} s", event.observed_cycles, "-")
-                return
-            snapshot = self.lifecycle.snapshot
+        try:
+            record = self.controller.observe(
+                event,
+                source_draining=source_draining
+                or (self.controller.mode == "replay" and self.controller.lifecycle.snapshot.state == RunState.STOPPING),
+            )
+        except (RuntimeError, ValueError) as error:
+            self.controller.lifecycle.coverage_lost(f"Cycle accounting failed: {error}")
+            self._render_observation(ObservationUpdate(event, error=str(error)))
+            return
+        self._render_observation(ObservationUpdate(event, record))
+
+    def _render_observation(self, update: ObservationUpdate) -> None:
+        event, record = update.event, update.record
+        if update.error:
+            self._set_notice(f"Cycle accounting failed: {update.error}")
+            self._log("Cycle accounting fault", update.error, f"{event.timestamp:.3f} s", event.observed_cycles, "-")
+            return
+        if record is not None:
+            snapshot = self.controller.lifecycle.snapshot
             self.inspected_cycles.setText(f"Inspected {snapshot.inspected} | Uninspected {snapshot.uninspected}")
         if event.cycle_started:
             self._log(
@@ -3394,18 +3251,7 @@ class MainWindow(QMainWindow):
                 event.observed_cycles,
                 str(event.frame_id),
             )
-        if event.inspection_ready and self.run_record is not None:
-            reason = (
-                "Awaiting cycle inference; result and evidence pending"
-                if self._live_inspection is not None
-                else "Unknown / Uninspected: counting-only run; no detector bound"
-            )
-            record = InspectionRecord(
-                self.run_record.run_id, event.observed_cycles, event.frame_id, event.timestamp, reason
-            )
-            self.inspections.append(record)
-            if len(self.inspections) > 500:
-                del self.inspections[0]
+        if record is not None:
             self._log(
                 "Inspection position",
                 record.reason,
@@ -3430,39 +3276,30 @@ class MainWindow(QMainWindow):
 
     def _update_defect_alarm(self) -> None:
         self.defect_alarm.setText(
-            f"DEFECT ALARM: {self._live_defects} (latched)" if self._live_defects else "No latched defect alarm"
+            f"DEFECT ALARM: {self.controller.defects} (latched)"
+            if self.controller.defects
+            else "No latched defect alarm"
         )
-        self.defect_alarm.setProperty("latched", bool(self._live_defects))
+        self.defect_alarm.setProperty("latched", bool(self.controller.defects))
         self.defect_alarm.style().unpolish(self.defect_alarm)
         self.defect_alarm.style().polish(self.defect_alarm)
         self.defect_alarm.setAccessibleName(self.defect_alarm.text())
 
     def _poll_live_inspection(self) -> None:
-        worker = self._live_inspection
-        if worker is None:
-            return
-        for _ in range(worker.results.maxsize):
-            try:
-                detection = worker.results.get_nowait()
-            except Empty:
-                break
-            ticket = self._live_tickets.pop(detection.event.frame_id, None)
-            if ticket is None:
-                self._set_notice("Live result has no matching cycle ticket; result rejected.")
-                continue
-            outcome = InspectionOutcome.UNINSPECTED
-            if detection.result is not None:
-                outcome = worker.binding.verdict(detection.result.score)
-            evidence_saved = detection.evidence is not None and not detection.reason
-            self.lifecycle.settle(ticket, outcome, evidence_saved=evidence_saved)
-            if outcome == InspectionOutcome.DEFECT:
-                self._live_defects += 1
+        self._render_inspections(self.controller.poll_inspections())
+
+    def _render_inspections(self, batch: InspectionPoll) -> None:
+        for reason in batch.rejected:
+            self._set_notice(reason)
+        for update in batch.updates:
+            detection = update.detection
+            ticket = update.ticket
+            evidence_saved = update.evidence_saved
             self._update_defect_alarm()
-            verdict = outcome if evidence_saved else InspectionOutcome.UNINSPECTED
+            verdict = update.verdict
             label = verdict.value
             score = f"{detection.result.score:.3f}" if detection.result is not None else "-"
-            if ticket.cycle >= self._latest_live_cycle:
-                self._latest_live_cycle = ticket.cycle
+            if update.is_latest:
                 self._show_verdict(verdict, f"Cycle {ticket.cycle} - {label}")
                 if detection.result is not None:
                     result = detection.result
@@ -3480,12 +3317,11 @@ class MainWindow(QMainWindow):
                     str(detection.evidence) if detection.evidence is not None else detection.reason
                 )
                 self.assessment_note.setText(
-                    f"UNQUALIFIED | Score {score} | Threshold {worker.binding.threshold:.3f} "
-                    f"| Review margin {worker.binding.review_margin:.3f}"
+                    f"UNQUALIFIED | Score {score} | Threshold {update.binding.threshold:.3f} "
+                    f"| Review margin {update.binding.review_margin:.3f}"
                 )
                 self.condition.setToolTip(detection.reason or self.assessment_note.text())
             if detection.reason:
-                self._live_fault = detection.reason
                 self._set_notice(detection.reason)
             self._log(
                 "Cycle inspection",
@@ -3494,45 +3330,35 @@ class MainWindow(QMainWindow):
                 ticket.cycle,
                 str(ticket.frame_id),
             )
-        if worker.failure:
-            self._live_fault = worker.failure
-            self._set_notice(worker.failure)
-            if not self._latest_live_cycle:
+        if batch.failure:
+            self._set_notice(batch.failure)
+            if not self.controller.latest_cycle:
                 self._show_verdict(InspectionOutcome.UNINSPECTED, "Unknown - Detector / evidence unavailable")
-                self.assessment_note.setText(f"UNQUALIFIED | {worker.failure}")
-            if "backlog overflow" in worker.failure:
-                for ticket in self._live_tickets.values():
-                    self.lifecycle.settle(ticket, InspectionOutcome.UNINSPECTED, evidence_saved=False)
-                    if ticket.cycle >= self._latest_live_cycle:
-                        self._latest_live_cycle = ticket.cycle
-                        self._show_verdict(InspectionOutcome.UNINSPECTED, f"Cycle {ticket.cycle} - Uninspected")
-                        self.evidence.setText("Unavailable")
-                        self.roi_view.clear()
-                        self.roi_caption.setText(f"Cycle {ticket.cycle} ROI - unavailable")
-                self._live_tickets.clear()
-        snapshot = self.lifecycle.snapshot
+                self.assessment_note.setText(f"UNQUALIFIED | {batch.failure}")
+            if batch.unavailable is not None:
+                ticket = batch.unavailable
+                self._show_verdict(InspectionOutcome.UNINSPECTED, f"Cycle {ticket.cycle} - Uninspected")
+                self.evidence.setText("Unavailable")
+                self.roi_view.clear()
+                self.roi_caption.setText(f"Cycle {ticket.cycle} ROI - unavailable")
+        snapshot = self.controller.lifecycle.snapshot
         self.inspected_cycles.setText(
-            f"Inspected {snapshot.inspected} | Uninspected {snapshot.uninspected} | Pending {len(self._live_tickets)}"
+            f"Inspected {snapshot.inspected} | Uninspected {snapshot.uninspected} "
+            f"| Pending {len(self.controller.tickets)}"
         )
         self._refresh_operator_status()
 
     def poll(self) -> None:
         """Consume bounded worker data on the UI thread without blocking capture."""
         self._refresh_operator_status()
-        if self._mode == "camera":
+        if self.controller.mode == "camera":
             self._poll_camera()
             return
-        if self.pipeline is None:
+        if self.controller.pipeline is None:
             return
-        for _ in range(self.pipeline.events.maxsize):
-            try:
-                self._event(self.pipeline.events.get_nowait())
-            except Empty:
-                break
-        try:
-            preview = self.pipeline.previews.get_nowait()
-        except Empty:
-            preview = None
+        batch = self.controller.poll_replay(monotonic())
+        self._render_source_poll(batch)
+        preview = batch.preview
         if preview is not None:
             self.live_view.display(preview, self.recipe)
             self.frame_label.setText(
@@ -3540,9 +3366,9 @@ class MainWindow(QMainWindow):
             )
             self.cycles.setText(str(preview.result.observed_cycles))
             self.sync.setText(preview.result.state.value)
-        status = self.pipeline.status
+        status = self.controller.pipeline.status
         self.health.setText(status.state)
-        freshness = "Replay | not a live camera" if self.pipeline.alive else "Stopped | last replay frame"
+        freshness = "Replay | not a live camera" if self.controller.pipeline.alive else "Stopped | last replay frame"
         self.freshness.setText(freshness)
         self._set_notice(status.reason if status.state == "Fault" else "")
         if status.state in {"Fault", "Ended", "Stopped"} and status.state != self._last_status:
@@ -3550,11 +3376,9 @@ class MainWindow(QMainWindow):
                 status.state, status.reason, datetime.now(UTC).strftime("%H:%M:%S UTC"), int(self.cycles.text()), "-"
             )
         self._last_status = status.state
-        if not self.pipeline.alive:
-            self.lifecycle.request_stop(monotonic())
-            self.lifecycle.finish_stop(monotonic(), source_quiescent=self.pipeline.events.empty())
+        if not self.controller.pipeline.alive:
             self._set_running(False)
-            if self._closing:
+            if self.controller.closing:
                 self.close()
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -3570,23 +3394,16 @@ class MainWindow(QMainWindow):
         collecting = self._training_dialog is not None and self._training_dialog._capturing()
         if collecting:
             self._training_dialog._stop_collection()
-        if self._busy() or collecting:
-            if self._close_requested_at is not None and monotonic() - self._close_requested_at >= 3:
-                self._timer.stop()
-                event.accept()
-                return
-            self._closing = True
-            if self._close_requested_at is None:
-                self._close_requested_at = monotonic()
-                QTimer.singleShot(3100, self.close)
-            self.stop_replay()
-            self.disconnect_camera()
-            self._set_notice("Closing source | waiting for worker shutdown.")
-            event.ignore()
+        if self.controller.close_ready(monotonic(), collecting=collecting):
+            self._timer.stop()
+            event.accept()
             return
-        self._timer.stop()
-        event.accept()
-
+        if self.controller.request_close(monotonic()):
+            QTimer.singleShot(3100, self.close)
+        if self.controller.stopping_trial is not None:
+            self._finalize_marker_stop()
+        self._set_notice("Closing source | waiting for worker shutdown.")
+        event.ignore()
 
     def _basic_settings(self) -> None:
         dialog = QDialog(self)

@@ -50,7 +50,7 @@ QPushButton#primary:hover { background: #60A5FA; }
 QPushButton#primary:pressed { background: #2563EB; color: #E8EAED; }
 QPushButton#primary:disabled { background: #171A21; color: #9AA0A6; }
 QPushButton#primary:focus { border-color: #E8EAED; }
-QFrame#controlPanel QPushButton#primary { background: #195C32; color: #E8EAED; border-color: #389C59; }
+QFrame#controlPanel QPushButton#primary { background: #195C32; color: #F4FFF7; border-color: #389C59; }
 QFrame#controlPanel QPushButton#primary:hover { background: #227542; }
 QFrame#controlPanel QPushButton#primary:pressed { background: #124526; }
 QFrame#controlPanel QPushButton#primary:focus { border-color: #E8EAED; }
@@ -173,6 +173,7 @@ QPushButton#primary:hover { background: #318B57; border-color: #70C18B; }
 QPushButton#primary:pressed { background: #1D613A; }
 QPushButton#stopAction { color: #FFD2D7; border-color: #74434C; background: #2A1A1F; }
 QPushButton#stopAction:hover { background: #3A2027; border-color: #B75B6C; }
+QPushButton#stopAction:disabled { background: #171A21; color: #9AA0A6; border-color: #2A3A4B; }
 QPushButton:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
 QPlainTextEdit:focus, QTableWidget:focus { border: 2px solid #69A9F5; }
 QTableWidget { border-radius: 7px; alternate-background-color: #131C27; }

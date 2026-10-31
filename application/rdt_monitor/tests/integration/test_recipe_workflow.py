@@ -6,8 +6,8 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from PyQt6.QtGui import QImage
-from PyQt6.QtWidgets import QApplication, QDialog
+from PySide6.QtGui import QImage
+from PySide6.QtWidgets import QApplication, QDialog
 
 import rdt_monitor.app as desktop
 from rdt_monitor.recipes import (
@@ -16,7 +16,34 @@ from rdt_monitor.recipes import (
     load_recipe,
     save_inspection_recipe,
     save_recipe,
+    save_run_setup,
 )
+from rdt_monitor.replay import MarkerAppearance, Region
+
+
+@pytest.mark.parametrize("width", [31, 32])
+def test_setup_image_buffer_preserves_pixels_and_row_padding(application, width):
+    pixels = np.random.default_rng(42).integers(0, 256, (60, width, 3), dtype=np.uint8)
+    image = QImage(pixels.data, width, 60, pixels.strides[0], QImage.Format.Format_BGR888).copy()
+    recipe = replace(desktop.fixture_recipe(), marker=Region(0.1, 0.1, 0.3, 0.5), position=Region(0.6, 0.1, 0.3, 0.5))
+    window = desktop.MainWindow()
+    dialog = desktop.ReplaySettings(recipe, window, camera_image=image, specimen_id="actual-specimen")
+    try:
+        for inputs, region in zip(dialog._regions, (recipe.marker, recipe.position), strict=True):
+            for spin, value in zip(inputs, (region.left, region.top, region.width, region.height), strict=True):
+                spin.setValue(value * 100)
+        dialog.recognition_mode.setCurrentIndex(0)
+        candidate = dialog._candidate_recipe(require_confirmation=False)
+        assert candidate.marker_appearance == MarkerAppearance.capture(pixels, candidate.marker)
+        assert candidate.position_appearance == MarkerAppearance.capture(pixels, candidate.position)
+        window.live_view._display_image(pixels)
+        before = window.live_view._image.pixelColor(0, 0)
+        pixels[:] = 0
+        assert window.live_view._image.pixelColor(0, 0) == before
+    finally:
+        dialog.close()
+        window.close()
+        application.processEvents()
 
 
 @pytest.fixture(scope="module")
@@ -75,7 +102,7 @@ def test_operator_relabels_markers_and_records_run_without_replacing_model(setup
     assert dialog.run_setup.specimen_id == "A-002"
     assert dialog.run_setup.recipe.position != stored.recipe.position
     assert dialog.run_setup.detector == stored.detector
-    snapshot = desktop.save_run_setup(tmp_path / "results", "c" * 12, dialog.run_setup, path)
+    snapshot = save_run_setup(tmp_path / "results", "c" * 12, dialog.run_setup, path)
     record = json.loads(snapshot.read_text())
     assert record["setup"]["specimen"]["batch"] == "lot-2"
     assert record["setup"]["profile"]["family_id"] == stored.profile.family_id

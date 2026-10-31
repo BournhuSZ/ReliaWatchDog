@@ -4,6 +4,55 @@ Status: agreed PyQt6 + Modern Industrial Bauhaus design baseline, 2026-10-14.
 This is a UI specification, not a completed implementation. Operational contracts
 and qualification gates are defined in [Architecture.md](Architecture.md).
 
+## Implementation update: 2026-10-30
+
+The [revised migration plan](RDT_PySide6_QML_Migration_Spec.md) and
+[progress record](QML_Migration_Progress.md) supersede the historical PyQt6 technology
+baseline below: the monitor now uses PySide6 with an optional QML operating screen.
+The QML setup editor now provides frozen-frame Basic/Advanced configuration; the
+native editor remains available with the complete Widgets interface. Current recipe editing
+and training export do not require credentials; station authorization remains a
+separate production gate. Historical protection requirements below describe intent,
+not implemented access control.
+
+### Applied GUI color portfolio
+
+The operating screen combines conventional File/Edit/View/Tools/Help menus with
+direct access to camera connection, specimen/recipe setup and Start/Stop. Offline
+inspection, Open results and Settings are menu commands, per the latest operator
+preference. A persistent Lock GUI switch shows and changes the input-lock state.
+Menus also retain training, diagnostic, appearance and detail actions. Keep monitoring controls pinned outside
+result scrolling when window height is limited. Menus and front-panel shortcuts
+share actions rather than separate eligibility/command logic.
+
+The effective existing GUI palette is preserved through semantic tokens in
+[`palette.py`](../application/rdt_monitor/src/rdt_monitor/palette.py), consumed by
+QML and the Widgets verdict painter. Widgets controls retain matched QSS colors.
+
+| Role | Dark | Light | Meaning |
+| --- | --- | --- | --- |
+| Background / panel | `#0A1017` / `#101A25` | `#EEF1F5` / `#FFFFFF` | Work areas |
+| Main / secondary text | `#E8EAED` / `#9EADBD` | `#20242A` / `#5E6A77` | Readable hierarchy |
+| Keyboard focus | `#69A9F5` | `#2673C5` | Active keyboard target |
+| Normal | `#4ADE80` | `#21683B` | Evidence-qualified normal only |
+| Needs review | `#FACC15` | `#795411` | Existing inclusive review band |
+| Defect | `#FB7185` | `#B4233C` | Latest defect and separate latched alarm |
+| Uninspected / unknown | `#A7B4C4` | `#535D69` | Never substitute green |
+| Start background | `#195C32` | `#237646` | Start monitoring |
+| Stop text | `#FFD2D7` | `#8E293B` | Stop monitoring |
+
+Blue `#3B82F6` Start-marker, amber `#EAB308` Position-marker and cyan `#22D3EE`
+inspection-ROI outlines remain distinct from verdict colors. Overlay labels retain
+dark backing in both themes. The original red/orange heatmap and its opacity are
+unchanged; it is an optional display of the exact inspected frame.
+
+Pair every state color with text/symbols. Camera health, run health, latest verdict,
+coverage and the latched alarm remain independent. Test hover, pressed, disabled
+and keyboard focus states in both themes. Named text/background pairs target the
+[WCAG 4.5:1 text contrast criterion](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum/);
+measured color pairs and native screenshots do not establish full accessibility
+compliance, DPI acceptance or hardware qualification.
+
 ## 1. Philosophy And Operating Context
 
 - Function first: precise geometry, clear hierarchy, high contrast, restrained color.

@@ -24,7 +24,7 @@ the qualification gates below.
 | Component | Decision | Constraint |
 | --- | --- | --- |
 | Language/environment | Python; manage the environment with `uv` | Pin a version supported by selected dependencies and the target PC |
-| UI | PyQt6 Widgets, QSS, Qt property animations | Resolve GPL/commercial distribution obligations before release |
+| UI | PySide6 Qt Quick/QML covers all GUI workflows; Widgets remains the default fallback pending workstation acceptance | Preserve pipeline parity; review bundled Qt distribution obligations before release |
 | Camera adapter | OpenCV is provisional | Verify NR-CM01 acquisition on the actual driver and target PC |
 | Detection | Anomalib PatchCore primary; qualified classical methods where appropriate | No automatic classical fallback that reports normal after model failure |
 | Persistence | SQLite plus evidence files | Isolate writes from capture, inference, and rendering |
@@ -35,6 +35,12 @@ the qualification gates below.
 The existing [camera wrapper](../tools/keyence_nr_cm01_api.py) probes generic
 OpenCV device indices. It does not prove NR-CM01 USB/UVC compatibility, camera
 identity, sustained frame rate, or production reliability.
+
+The [migration plan](RDT_PySide6_QML_Migration_Spec.md) updates the original PyQt6
+technology choice. The [progress record](QML_Migration_Progress.md) distinguishes
+controller extraction, binding-port validation and completed QML workflow work. The
+[acceptance record](QML_Migration_Acceptance.md) distinguishes software release-candidate
+checks from pending station qualification and default-launcher cutover.
 
 ## 3. Ownership And Data Flow
 
@@ -246,7 +252,7 @@ the affected recipe/system unqualified; example numbers are not production defau
 | Authentication | Offline identity provisioning, supervisor credential protection/recovery, audit access and retention |
 | Display | Target resolution, Windows scaling, minimum usable window size, keyboard/mouse usability |
 | Camera compatibility | Actual NR-CM01/driver acquisition, identity, frame timing, disconnect/reconnect and sustained recording tests |
-| Deployment | Pinned environment, dependency/license review including PyQt6, clean offline Windows installation, packaged end-to-end acceptance |
+| Deployment | Pinned environment, dependency/license review including PySide6/Qt, clean offline Windows installation, packaged end-to-end acceptance |
 
 Acceptance tests must cover marker persistence/startup/rearming, ambiguous/missed
 markers and coverage gaps, position-gated inference, overload, stale heatmaps,

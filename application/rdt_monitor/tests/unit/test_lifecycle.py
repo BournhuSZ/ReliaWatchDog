@@ -50,6 +50,44 @@ def test_development_counts_are_never_inspected(run, record):
     snapshot = run.snapshot
     assert snapshot.state == RunState.RUNNING
     assert (snapshot.observed, snapshot.inspected, snapshot.uninspected, snapshot.pending) == (2, 0, 2, 0)
+    assert (snapshot.passed, snapshot.failed, snapshot.reviewed) == (0, 0, 0)
+
+
+@pytest.mark.parametrize("evidence_saved", [False, True])
+@pytest.mark.parametrize("outcome", list(InspectionOutcome))
+def test_summary_counts_only_finalized_evidence_backed_outcomes(run, record, ready, outcome, evidence_saved):
+    run.start(record, mode=RunMode.INSPECTION, readiness=ready)
+    ticket = run.observe_cycle(1, 1, 1)
+    run.settle(ticket, outcome, evidence_saved=evidence_saved)
+    snapshot = run.snapshot
+    valid = evidence_saved and outcome != InspectionOutcome.UNINSPECTED
+    assert snapshot.passed == int(valid and outcome == InspectionOutcome.NO_DEFECT)
+    assert snapshot.failed == int(valid and outcome == InspectionOutcome.DEFECT)
+    assert snapshot.reviewed == int(valid and outcome == InspectionOutcome.NEEDS_REVIEW)
+    assert snapshot.passed + snapshot.failed + snapshot.reviewed == snapshot.inspected == int(valid)
+    assert snapshot.defects == int(outcome == InspectionOutcome.DEFECT)
+    with pytest.raises(ValueError, match="not pending"):
+        run.settle(ticket, outcome, evidence_saved=evidence_saved)
+    assert run.snapshot == snapshot
+
+
+def test_summary_is_cumulative_beyond_history_capacity_and_resets_only_on_new_run(run, record, ready):
+    run.start(record, mode=RunMode.INSPECTION, readiness=ready)
+    outcomes = [InspectionOutcome.NO_DEFECT, InspectionOutcome.DEFECT, InspectionOutcome.NEEDS_REVIEW]
+    for cycle in range(1, 604):
+        ticket = run.observe_cycle(cycle, cycle, float(cycle))
+        run.settle(ticket, outcomes[(cycle - 1) % 3], evidence_saved=True)
+    assert (run.snapshot.passed, run.snapshot.failed, run.snapshot.reviewed, run.snapshot.inspected) == (
+        201,
+        201,
+        201,
+        603,
+    )
+    run.request_stop(1000)
+    assert run.finish_stop(1001, source_quiescent=True)
+    assert (run.snapshot.passed, run.snapshot.failed, run.snapshot.reviewed) == (201, 201, 201)
+    run.start(replace(record, run_id="new-run"), mode=RunMode.INSPECTION, readiness=ready)
+    assert (run.snapshot.passed, run.snapshot.failed, run.snapshot.reviewed) == (0, 0, 0)
 
 
 def test_exact_cycle_identity_and_once_only_settlement(run, record, ready):

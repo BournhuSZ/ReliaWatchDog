@@ -105,6 +105,9 @@ class RunSnapshot:
         gaps (int): Distinct coverage interruptions.
         reason (str): Current transition or failure explanation.
         stop_timed_out (bool): Whether the latest Stop exceeded its finalization budget.
+        passed (int): Evidence-backed completed outcomes with no defect detected.
+        failed (int): Evidence-backed completed defect outcomes, separate from the alarm.
+        reviewed (int): Evidence-backed completed outcomes requiring review.
     """
 
     record: RunRecord | None
@@ -119,6 +122,9 @@ class RunSnapshot:
     gaps: int
     reason: str
     stop_timed_out: bool
+    passed: int = 0
+    failed: int = 0
+    reviewed: int = 0
 
 
 class RunLifecycle:
@@ -155,6 +161,7 @@ class RunLifecycle:
         self._inspected = 0
         self._uninspected = 0
         self._defects = 0
+        self._passed = self._failed = self._reviewed = 0
         self._gaps = 0
         self._pending: dict[int, CycleTicket] = {}
         self._deadline: float | None = None
@@ -176,6 +183,9 @@ class RunLifecycle:
             self._gaps,
             self._reason,
             self._stop_timed_out,
+            self._passed,
+            self._failed,
+            self._reviewed,
         )
 
     def start(self, record: RunRecord, *, mode: RunMode, readiness: Readiness) -> None:
@@ -210,6 +220,7 @@ class RunLifecycle:
         self._last_frame = -1
         self._last_timestamp = -1.0
         self._observed = self._inspected = self._uninspected = self._defects = self._gaps = 0
+        self._passed = self._failed = self._reviewed = 0
         self._pending.clear()
         self._deadline = None
         self._stop_timed_out = False
@@ -295,6 +306,12 @@ class RunLifecycle:
                 self.coverage_lost("Inspection or required evidence unavailable")
         else:
             self._inspected += 1
+            if outcome == InspectionOutcome.NO_DEFECT:
+                self._passed += 1
+            elif outcome == InspectionOutcome.DEFECT:
+                self._failed += 1
+            elif outcome == InspectionOutcome.NEEDS_REVIEW:
+                self._reviewed += 1
 
     def coverage_lost(self, reason: str) -> None:
         """Mark a coverage gap without stopping the application or inventing cycles.

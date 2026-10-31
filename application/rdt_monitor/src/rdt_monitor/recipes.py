@@ -199,10 +199,16 @@ class SpecimenDetails:
 
     name: str = ""
     batch: str = ""
+    family: str = ""
+    article_number: str = ""
 
     def __post_init__(self) -> None:
-        if any(not isinstance(value, str) or len(value) > 128 for value in (self.name, self.batch)):
-            raise ValueError("Specimen name and batch must contain at most 128 characters")
+        if any(not isinstance(value, str) or len(value) > 128 for value in (self.name, self.batch, self.family)):
+            raise ValueError("Specimen name, batch and family must contain at most 128 characters")
+        if not isinstance(self.article_number, str) or (
+            self.article_number and not re.fullmatch(r"[0-9]{12}", self.article_number)
+        ):
+            raise ValueError("Article number must be exactly 12 digits when provided")
 
 
 @dataclass(frozen=True)
@@ -306,9 +312,12 @@ def save_recipe(path: Path, stored: StoredRecipe) -> None:
         document["detector"] = asdict(stored.detector)
         document["schema_version"] = 4
     if stored.profile is not None:
-        document["schema_version"] = 5
+        document["schema_version"] = 6 if stored.specimen.family or stored.specimen.article_number else 5
         document["profile"] = asdict(stored.profile)
         document["specimen"] = asdict(stored.specimen)
+        if document["schema_version"] == 5:
+            document["specimen"].pop("family")
+            document["specimen"].pop("article_number")
         document["detector"] = asdict(stored.detector) if stored.detector is not None else None
     temporary: Path | None = None
     try:
@@ -344,15 +353,15 @@ def load_recipe(path: Path) -> StoredRecipe:
     try:
         raw = json.loads(content)
         keys = {"schema_version", "specimen_id", "recipe", "image_width", "image_height"}
-        if isinstance(raw, dict) and raw.get("schema_version") in (3, 4, 5):
+        if isinstance(raw, dict) and raw.get("schema_version") in (3, 4, 5, 6):
             keys.add("detector")
-        if isinstance(raw, dict) and raw.get("schema_version") == 5:
+        if isinstance(raw, dict) and raw.get("schema_version") in (5, 6):
             keys |= {"profile", "specimen"}
         document = _object(raw, keys)
     except (UnicodeError, RecursionError) as error:
         raise ValueError("Recipe file must contain valid JSON text") from error
     version = _integer(document["schema_version"])
-    if version not in (1, 2, 3, 4, 5):
+    if version not in (1, 2, 3, 4, 5, 6):
         raise ValueError("Unsupported recipe schema version")
     specimen_id = document["specimen_id"]
     if not isinstance(specimen_id, str):
@@ -360,7 +369,7 @@ def load_recipe(path: Path) -> StoredRecipe:
     fields = {"synchronization", "marker", "position", "brightness", "absent_fraction", "present_fraction"}
     if not isinstance(document["recipe"], dict):
         raise ValueError("Recipe settings must be an object")
-    has_appearance = version == 2 or (version in (3, 4, 5) and "marker_appearance" in document["recipe"])
+    has_appearance = version == 2 or (version in (3, 4, 5, 6) and "marker_appearance" in document["recipe"])
     if has_appearance:
         fields |= {"marker_appearance", "position_appearance"}
     settings = _object(document["recipe"], fields)
@@ -380,7 +389,7 @@ def load_recipe(path: Path) -> StoredRecipe:
         position_appearance=_appearance(settings["position_appearance"]) if has_appearance else None,
     )
     detector = None
-    if version in (3, 4) or (version == 5 and document["detector"] is not None):
+    if version in (3, 4) or (version in (5, 6) and document["detector"] is not None):
         fields = {"model_file", "model_sha256", "weights_sha256", "region", "threshold"}
         if version >= 4:
             fields.add("review_margin")
@@ -395,11 +404,18 @@ def load_recipe(path: Path) -> StoredRecipe:
         )
     profile = None
     specimen = SpecimenDetails()
-    if version == 5:
+    if version in (5, 6):
         metadata = _object(document["profile"], {"family_id", "revision", "name", "notes"})
         profile = RecipeProfile(*(_text(metadata[key]) for key in ("family_id", "revision", "name", "notes")))
-        details = _object(document["specimen"], {"name", "batch"})
-        specimen = SpecimenDetails(_text(details["name"]), _text(details["batch"]))
+        details = _object(
+            document["specimen"], {"name", "batch", "family", "article_number"} if version == 6 else {"name", "batch"}
+        )
+        specimen = SpecimenDetails(
+            _text(details["name"]),
+            _text(details["batch"]),
+            _text(details["family"]) if version == 6 else "",
+            _text(details["article_number"]) if version == 6 else "",
+        )
     return StoredRecipe(
         specimen_id.strip(),
         recipe,

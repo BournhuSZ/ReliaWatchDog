@@ -6,21 +6,21 @@ from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
 from time import monotonic
-from types import SimpleNamespace
 
 import cv2
 import numpy as np
 import pytest
-from PyQt6.QtCore import QPoint, QRect, QSettings, Qt
-from PyQt6.QtGui import QColor, QImage, QRawFont
-from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QDialog, QLabel, QStyle, QStyleOptionButton
+from PySide6.QtCore import QPoint, QRect, QSettings, Qt
+from PySide6.QtGui import QColor, QImage, QRawFont
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QStyle, QStyleOptionButton
 
 import rdt_monitor.app as desktop
 from rdt_monitor.camera import CameraFrame, CameraStatus, MarkerTrial
+from rdt_monitor.domain import RunRecord
 from rdt_monitor.lifecycle import RunState
 from rdt_monitor.recipes import StoredRecipe, load_recipe, save_recipe
-from rdt_monitor.replay import ReplayPipeline
+from rdt_monitor.replay import ReplayPipeline, SyntheticSource
 
 
 @pytest.mark.parametrize("mode", ["light", "dark"])
@@ -52,16 +52,15 @@ def test_evidence_column_aligns_with_controls_on_resize_and_drag(window, applica
         application.processEvents()
         assert window._roi_panel.width() == window.controls_scroll.width()
         assert window._roi_panel.mapTo(window, QPoint()).x() == window.controls_scroll.mapTo(window, QPoint()).x()
-        assert window.camera is None
+        assert window.controller.camera is None
     finally:
         application.setStyleSheet(original_stylesheet)
 
 
 @pytest.mark.parametrize("screen_size", [(1366, 720), (1024, 768), (1920, 1040)])
-def test_window_fits_available_screen_including_frame(window, application, monkeypatch, screen_size):
+def test_window_fits_available_screen_including_frame(window, application, screen_size):
     available = QRect(120, 80, *screen_size)
-    monkeypatch.setattr(window, "screen", lambda: SimpleNamespace(availableGeometry=lambda: available))
-    window._fit_available_screen()
+    window._fit_available_screen(available)
     window.show()
     application.processEvents()
     assert available.contains(window.frameGeometry())
@@ -89,7 +88,7 @@ def test_short_window_keeps_header_and_actions_reachable(window, application, tm
         assert position.y() >= 0
         assert position.y() + window.results_button.height() <= window.controls_scroll.viewport().height()
         assert window.grab().save(str(tmp_path / f"actions-{mode}-{size[0]}.png"))
-        assert window.camera is None
+        assert window.controller.camera is None
     finally:
         application.setStyleSheet(original_stylesheet)
 
@@ -112,9 +111,10 @@ def test_toolbar_polish_fits_both_themes_and_preserves_menus(window, application
             top_left = control.mapTo(window, desktop.QPointF(0, 0).toPoint())
             assert top_left.x() >= 0
             assert top_left.x() + control.width() <= window.width()
-        assert window.specimen.mapToGlobal(desktop.QPointF(0, 0).toPoint()).y() == controls[-1].mapToGlobal(
-            desktop.QPointF(0, 0).toPoint()
-        ).y()
+        assert (
+            window.specimen.mapToGlobal(desktop.QPointF(0, 0).toPoint()).y()
+            == controls[-1].mapToGlobal(desktop.QPointF(0, 0).toPoint()).y()
+        )
         capture = tmp_path / f"toolbar-{mode}-{size[0]}.png"
         assert window.grab().save(str(capture))
         print(f"Toolbar capture: {capture}")
@@ -125,7 +125,7 @@ def test_toolbar_polish_fits_both_themes_and_preserves_menus(window, application
             assert all(action.text() for action in menu.actions())
             assert menu.grab().save(str(tmp_path / f"{menu.title()}-{mode}.png"))
             menu.hide()
-        assert window.camera is None
+        assert window.controller.camera is None
     finally:
         application.setStyleSheet(original_stylesheet)
 
@@ -163,7 +163,7 @@ def test_basic_settings_visible_switches_and_restores_display_mode(window, tmp_p
         window._basic_settings()
         window._basic_settings()
         assert selections == ["Dark", "Light"]
-        assert window.camera is None
+        assert window.controller.camera is None
     finally:
         application.setStyleSheet(original_stylesheet)
 
@@ -278,10 +278,10 @@ def test_collection_exposes_lost_cycle_count_and_explicit_restart(window, monkey
     trial.observe(CameraFrame(0, 10.0, image))
     with pytest.raises(SynchronizationFault):
         trial.observe(CameraFrame(2, 10.1, image))
-    window.camera = SimpleNamespace(
+    window.controller.camera = SimpleNamespace(
         trial=trial, status=CameraStatus("Streaming", "", 0), stop=lambda: None, join=lambda *args: None
     )
-    window._last_camera_frame = CameraFrame(2, 10.1, image)
+    window.controller.last_frame = CameraFrame(2, 10.1, image)
     window.open_training_collection()
     dialog = window._training_dialog
     dialog._region_changed(0, desktop.Region(0.1, 0.1, 0.8, 0.8))
@@ -295,7 +295,7 @@ def test_collection_exposes_lost_cycle_count_and_explicit_restart(window, monkey
     monkeypatch.setattr(window, "start_marker_trial", lambda: calls.append("restart"))
     dialog.synchronize_button.click()
     assert calls == ["restart"]
-    window.camera = None
+    window.controller.camera = None
     dialog.close()
 
 
@@ -321,10 +321,12 @@ def test_cycle_aligned_collection_reaches_target_without_automatic_training(wind
         stop=lambda: None,
         join=lambda *args: None,
     )
-    window.camera = camera
-    window.run_record = RunRecord("run-capture", "new-specimen", "sync-v1", "Injected camera", datetime.now(UTC))
+    window.controller.camera = camera
+    window.controller.run_record = RunRecord(
+        "run-capture", "new-specimen", "sync-v1", "Injected camera", datetime.now(UTC)
+    )
     baseline = np.full((60, 80, 3), 255, dtype=np.uint8)
-    window._last_camera_frame = CameraFrame(0, 10.0, baseline)
+    window.controller.last_frame = CameraFrame(0, 10.0, baseline)
     window.open_training_collection()
     dialog = window._training_dialog
     dialog.folder.setText(str(tmp_path))
@@ -362,7 +364,7 @@ def test_cycle_aligned_collection_reaches_target_without_automatic_training(wind
     assert not dialog.confirm.isChecked()
     assert not dialog.train_button.isEnabled()
     assert "Defect inspection unavailable" in window.assessment_note.text()
-    window.camera = None
+    window.controller.camera = None
     dialog.close()
 
 
@@ -387,7 +389,7 @@ def test_manual_collection_requires_click_per_cycle_and_keeps_training_explicit(
     manual_collection_dialog, window, monkeypatch
 ):
     dialog = manual_collection_dialog
-    assert window.camera.trial is None
+    assert window.controller.camera.trial is None
     assert dialog.collect_button.isEnabled()
     assert dialog.cycle_mode.currentData() == "manual"
     dialog.collect_button.click()
@@ -400,7 +402,7 @@ def test_manual_collection_requires_click_per_cycle_and_keeps_training_explicit(
     for cycle in range(1, 21):
         clock[0] += 1
         pixels = np.full((24, 32, 3), cycle, dtype=np.uint8)
-        window._last_camera_frame = CameraFrame(cycle, clock[0], pixels)
+        window.controller.last_frame = CameraFrame(cycle, clock[0], pixels)
         dialog.poll()
         assert len(writer.document.records) == cycle - 1
         assert dialog.capture_cycle_button.isEnabled()
@@ -421,7 +423,7 @@ def test_manual_collection_requires_click_per_cycle_and_keeps_training_explicit(
     assert dialog.cycle_count.text() == "Operator-declared cycles saved: 20"
     assert not dialog.confirm.isChecked()
     assert not dialog.train_button.isEnabled()
-    assert window.run_record is None
+    assert window.controller.run_record is None
     assert window.cycles.text() == "0"
     for cycle, record in enumerate(dialog._document.records, 1):
         assert record.cycle == cycle
@@ -439,7 +441,7 @@ def test_manual_capture_rejects_stale_frames_and_stops_on_disconnect(manual_coll
     clock = 100.0
     monkeypatch.setattr(desktop, "monotonic", lambda: clock)
     image = np.zeros((24, 32, 3), dtype=np.uint8)
-    window._last_camera_frame = CameraFrame(10, clock - 2, image)
+    window.controller.last_frame = CameraFrame(10, clock - 2, image)
     dialog.poll()
     assert not dialog.capture_cycle_button.isEnabled()
     dialog._capture_manual_cycle()
@@ -463,7 +465,7 @@ def test_manual_collection_ignores_marker_fault_but_early_stop_is_incomplete(man
     trial.observe(CameraFrame(0, 10.0, image))
     with pytest.raises(SynchronizationFault):
         trial.observe(CameraFrame(2, 10.1, image))
-    window.camera.trial = trial
+    window.controller.camera.trial = trial
     dialog._refresh()
     assert dialog.collect_button.isEnabled()
     dialog.collect_button.click()
@@ -565,7 +567,7 @@ def test_offline_inspection_is_independent_and_requires_inputs(window):
     assert dialog.editor.region_labels[0] == "INSPECTION ROI"
     assert "Unknown" in window.condition.text()
     assert "Defect inspection unavailable" in window.assessment_note.text()
-    assert window.run_record is None
+    assert window.controller.run_record is None
     window.offline_inspection_action.trigger()
     assert window._inspection_dialog is dialog
 
@@ -611,7 +613,7 @@ def test_offline_real_runtime_result_is_snapshot_aligned_and_invalidates(offline
     dialog.heatmap.setChecked(False)
     assert np.array_equal(dialog._composite(), original)
     assert "Unknown" in window.condition.text()
-    assert window.inspections == []
+    assert window.controller.inspections == []
     dialog.threshold.setValue(0.7)
     assert dialog._result is None
     assert "Unknown" in dialog.assessment.text()
@@ -706,12 +708,12 @@ def window(application, monkeypatch, tmp_path):
     instance = desktop.MainWindow()
     instance.specimen.setText("PCB-TEST-001")
     yield instance
-    if instance.pipeline is not None:
-        instance.pipeline.stop()
-        instance.pipeline.join(10)
-    if instance.camera is not None:
-        instance.camera.stop()
-        instance.camera.join(10)
+    if instance.controller.pipeline is not None:
+        instance.controller.pipeline.stop()
+        instance.controller.pipeline.join(10)
+    if instance.controller.camera is not None:
+        instance.controller.camera.stop()
+        instance.controller.camera.join(10)
     instance.close()
     application.processEvents()
 
@@ -724,8 +726,8 @@ def run_fixture(window, monkeypatch):
     )
     window.fixture_button.click()
     window.start_replay()
-    window.pipeline.join(10)
-    assert not window.pipeline.alive
+    window.controller.pipeline.join(10)
+    assert not window.controller.pipeline.alive
     window.poll()
 
 
@@ -740,7 +742,7 @@ def test_startup_is_unqualified_and_inspection_is_unavailable(window):
     assert window.open_button.isHidden()
     assert window.start_button.isHidden()
     assert window.diagnostics_menu.title() == "Diagnostics"
-    assert window.run_record is None
+    assert window.controller.run_record is None
 
 
 def test_application_font_has_latin_glyphs(application):
@@ -759,7 +761,7 @@ def test_replay_settings_lock_during_run(window):
     assert window.stop_button.isEnabled()
     assert "locked" in window.run_label.text()
     window.stop_replay()
-    window.pipeline.join(10)
+    window.controller.pipeline.join(10)
     window.poll()
     assert window.settings_button.isEnabled()
     assert window.start_button.isEnabled()
@@ -768,8 +770,8 @@ def test_replay_settings_lock_during_run(window):
 def test_fixture_inspections_remain_unknown_and_not_saved(window, monkeypatch):
     run_fixture(window, monkeypatch)
     assert window.cycles.text() == "4"
-    assert len(window.inspections) == 4
-    assert all("Unknown" in record.reason for record in window.inspections)
+    assert len(window.controller.inspections) == 4
+    assert all("Unknown" in record.reason for record in window.controller.inspections)
     assert window.health.text() == "Ended"
     assert "Stopped" in window.freshness.text()
     assert window.evidence.text() == "Not recorded"
@@ -778,21 +780,21 @@ def test_fixture_inspections_remain_unknown_and_not_saved(window, monkeypatch):
 
 def test_new_run_requires_operator_command_and_gets_fresh_identity(window, monkeypatch):
     run_fixture(window, monkeypatch)
-    run_id = window.run_record.run_id
+    run_id = window.controller.run_record.run_id
     window.poll()
-    assert window.run_record.run_id == run_id
-    assert not window.pipeline.alive
+    assert window.controller.run_record.run_id == run_id
+    assert not window.controller.pipeline.alive
     window.start_button.click()
-    window.pipeline.join(10)
+    window.controller.pipeline.join(10)
     window.poll()
-    assert window.run_record.run_id != run_id
-    assert len(window.inspections) == 4
+    assert window.controller.run_record.run_id != run_id
+    assert len(window.controller.inspections) == 4
 
 
 def test_missing_video_is_a_visible_fault_not_a_normal_result(window):
-    window._source = "does-not-exist.avi"
+    window.controller.source = "does-not-exist.avi"
     window.start_replay()
-    window.pipeline.join(10)
+    window.controller.pipeline.join(10)
     window.poll()
     assert window.health.text() == "Fault"
     assert "Unknown" in window.condition.text()
@@ -888,7 +890,7 @@ def test_camera_connect_previews_without_inspecting(window, camera_stub):
     assert window.live_view._recipe is None
     assert "Unknown" in window.condition.text()
     assert "preview only" in window.sync.text()
-    assert window.run_record is None and window.inspections == []
+    assert window.controller.run_record is None and window.controller.inspections == []
     assert window.cycles.text() == "0"
     assert not window.fixture_button.isEnabled()
     assert not window.open_button.isEnabled()
@@ -905,9 +907,9 @@ def test_production_commands_cannot_start_development_work(window, camera_stub):
     window.start_work()
     assert "Live defect detector" in window.fault.text()
     assert "Approved recipe" in window.fault.text()
-    assert window.run_record is None
-    assert window.lifecycle.snapshot.state == RunState.STOPPED
-    assert window.camera.trial is None
+    assert window.controller.run_record is None
+    assert window.controller.lifecycle.snapshot.state == RunState.STOPPED
+    assert window.controller.camera.trial is None
 
 
 def test_run_controls_are_on_main_screen_not_in_diagnostics(window, application, camera_stub):
@@ -937,8 +939,8 @@ def test_stop_drains_cycles_not_yet_polled_and_retains_run_identity(window, came
     window.poll()
     approve_trial(monkeypatch)
     window.trial_button.click()
-    record = window.run_record
-    trial = window.camera.trial
+    record = window.controller.run_record
+    trial = window.controller.camera.trial
     for index in range(3):
         pixels = np.full((24, 32, 3), 0 if index == 1 else 255, dtype=np.uint8)
         trial.observe(CameraFrame(index, 10 + index / 30, pixels))
@@ -947,14 +949,14 @@ def test_stop_drains_cycles_not_yet_polled_and_retains_run_identity(window, came
     assert trial.stopped
     assert window.cycles.text() == "1"
     assert window.inspected_cycles.text() == "Inspected 0 | Uninspected 1"
-    assert window.lifecycle.snapshot.state == RunState.STOPPED
-    assert window.lifecycle.snapshot.record == record
-    assert len(window.inspections) == 1
-    assert window.camera.alive
+    assert window.controller.lifecycle.snapshot.state == RunState.STOPPED
+    assert window.controller.lifecycle.snapshot.record == record
+    assert len(window.controller.inspections) == 1
+    assert window.controller.camera.alive
     window.poll()
     window.poll()
-    assert window.lifecycle.snapshot.observed == 1
-    assert len(window.inspections) == 1
+    assert window.controller.lifecycle.snapshot.observed == 1
+    assert len(window.controller.inspections) == 1
 
 
 def test_disconnect_finalizes_development_run_before_camera_release(window, camera_stub, monkeypatch):
@@ -962,12 +964,12 @@ def test_disconnect_finalizes_development_run_before_camera_release(window, came
     window.poll()
     approve_trial(monkeypatch)
     window.trial_button.click()
-    record = window.run_record
+    record = window.controller.run_record
     window.disconnect_camera()
-    assert window.lifecycle.snapshot.state == RunState.STOPPED
-    assert window.lifecycle.snapshot.record == record
-    assert not window.camera.alive
-    assert window.camera.trial is None
+    assert window.controller.lifecycle.snapshot.state == RunState.STOPPED
+    assert window.controller.lifecycle.snapshot.record == record
+    assert not window.controller.camera.alive
+    assert window.controller.camera.trial is None
 
 
 def test_disconnect_waits_asynchronously_for_accepted_capture(window, camera_stub, monkeypatch):
@@ -975,7 +977,7 @@ def test_disconnect_waits_asynchronously_for_accepted_capture(window, camera_stu
     window.poll()
     approve_trial(monkeypatch)
     window.trial_button.click()
-    trial = window.camera.trial
+    trial = window.controller.camera.trial
     entered, release = Event(), Event()
 
     def capture(image, result):
@@ -991,25 +993,25 @@ def test_disconnect_waits_asynchronously_for_accepted_capture(window, camera_stu
     try:
         assert entered.wait(5)
         window.disconnect_camera()
-        assert window.camera.alive
-        assert window.lifecycle.snapshot.state == RunState.STOPPING
-        assert window.lifecycle.snapshot.observed == 1
+        assert window.controller.camera.alive
+        assert window.controller.lifecycle.snapshot.state == RunState.STOPPING
+        assert window.controller.lifecycle.snapshot.observed == 1
         assert not window.trial_button.isEnabled()
     finally:
         release.set()
         worker.join(5)
     assert not worker.is_alive()
     window.poll()
-    assert not window.camera.alive
-    assert window.lifecycle.snapshot.state == RunState.STOPPED
-    assert window.lifecycle.snapshot.uninspected == 1
+    assert not window.controller.camera.alive
+    assert window.controller.lifecycle.snapshot.state == RunState.STOPPED
+    assert window.controller.lifecycle.snapshot.uninspected == 1
 
 
 def test_camera_and_replay_cannot_run_together(window, camera_stub):
     window.fixture_button.click()
     window.connect_camera()
     window.start_replay()
-    assert window.pipeline is None
+    assert window.controller.pipeline is None
     assert len(camera_stub) == 1
     window.connect_camera()
     assert len(camera_stub) == 1
@@ -1049,7 +1051,7 @@ def test_replay_disables_camera_connection(window):
     window.fixture_button.click()
     window.start_replay()
     window.connect_camera()
-    assert window.camera is None
+    assert window.controller.camera is None
     assert not window.connect_button.isEnabled()
     assert not window.camera_index.isEnabled()
 
@@ -1089,7 +1091,7 @@ def test_inspection_menu_exposes_collection_without_starting_work(window, applic
     assert dialog is not None and dialog.isVisible()
     assert dialog._collection is None
     assert not dialog._training()
-    assert window.run_record is None
+    assert window.controller.run_record is None
     dialog.close()
 
 
@@ -1106,7 +1108,7 @@ def test_results_button_opens_central_folder_without_changing_run(window, monkey
     window.results_button.click()
     assert root.is_dir()
     assert [Path(path) for path in opened] == [root]
-    assert window.run_record is None
+    assert window.controller.run_record is None
     assert window.condition.property("verdict_color") == "grey"
 
 
@@ -1136,7 +1138,7 @@ def test_results_button_failure_is_visible(window, monkeypatch, tmp_path, failur
 def test_verdict_palette_and_actions_fit_native_window(window, application, size, details, outcome, color, text):
     window.resize(*size)
     window._show_verdict(outcome, text)
-    window._live_defects = 12345
+    window.controller.defects = 12345
     window._update_defect_alarm()
     window.assessment_note.setText("UNQUALIFIED | Score 0.550 | Threshold 0.500 | Review margin 0.050")
     window.evidence.setText("Failure record saved")
@@ -1300,13 +1302,13 @@ def test_camera_connection_badge_does_not_confuse_preview_with_inspection(window
     now = monotonic()
     monkeypatch.setattr(desktop, "monotonic", lambda: now)
     window.connect_camera()
-    window.camera.status = desktop.replace(window.camera.status, last_received_at=now)
+    window.controller.camera.status = desktop.replace(window.controller.camera.status, last_received_at=now)
     window.poll()
     assert window.camera_connection.text() == "Live"
     assert window.camera_connection.property("connected") is True
     assert window.condition.property("verdict_color") == "grey"
-    assert window.run_record is None
-    window.camera.status = desktop.replace(window.camera.status, last_received_at=now - 2)
+    assert window.controller.run_record is None
+    window.controller.camera.status = desktop.replace(window.controller.camera.status, last_received_at=now - 2)
     window.poll()
     assert window.camera_connection.text() == "Preview stale"
     assert window.camera_connection.property("connected") is False
@@ -1367,14 +1369,14 @@ def lose_synchronization(window, monkeypatch):
     window.connect_camera()
     window.poll()
     window.trial_button.click()
-    session = window.camera.trial
+    session = window.controller.camera.trial
     pixels = np.zeros((24, 32, 3), dtype=np.uint8)
     present = np.full_like(pixels, 255)
     for index in range(42):
         session.observe(CameraFrame(index, 100 + index / 10, pixels if index == 1 else present))
     with pytest.raises(RuntimeError, match="overdue"):
         session.observe(CameraFrame(42, 104.25, present))
-    window.camera.frames.put_nowait(CameraFrame(200, monotonic(), pixels))
+    window.controller.camera.frames.put_nowait(CameraFrame(200, monotonic(), pixels))
     window.poll()
     return session
 
@@ -1385,20 +1387,20 @@ def test_synchronization_requires_specimen_id_and_locks_run_identity(window, cam
     window.poll()
     approve_trial(monkeypatch)
     window.trial_button.click()
-    assert window.camera.trial is None
+    assert window.controller.camera.trial is None
     assert "specimen ID" in window.fault.text()
     assert window.specimen.isEnabled()
     window.specimen.setText("  PCB-2026-001  ")
     window.trial_button.click()
-    assert window.run_record.specimen_id == "PCB-2026-001"
+    assert window.controller.run_record.specimen_id == "PCB-2026-001"
     assert not window.specimen.isEnabled()
     assert "PCB-2026-001" in window.run_label.text()
 
 
 def test_synchronization_loss_keeps_preview_live_and_requires_explicit_restart(window, camera_stub, monkeypatch):
     session = lose_synchronization(window, monkeypatch)
-    previous_run = window.run_record
-    assert window.camera.alive
+    previous_run = window.controller.run_record
+    assert window.controller.camera.alive
     assert window.health.text() == "Degraded"
     assert "Live" in window.freshness.text()
     assert "overdue" in window.sync.text()
@@ -1412,18 +1414,18 @@ def test_synchronization_loss_keeps_preview_live_and_requires_explicit_restart(w
     window.poll()
     window.poll()
     assert window.history.rowCount() == rows
-    assert window.camera.trial is session
-    assert window.run_record == previous_run
+    assert window.controller.camera.trial is session
+    assert window.controller.run_record == previous_run
     events = [window.history.item(row, 4).text() for row in range(rows)]
     assert events.count("Synchronization fault") == 1
     assert "Camera Fault" not in events
     window.specimen.setText("PCB-RESTARTED")
     window.trial_button.click()
     window.poll()
-    assert window.camera.trial is not session
-    assert window.camera.trial.result is None
-    assert window.run_record.run_id != previous_run.run_id
-    assert window.run_record.specimen_id == "PCB-RESTARTED"
+    assert window.controller.camera.trial is not session
+    assert window.controller.camera.trial.result is None
+    assert window.controller.run_record.run_id != previous_run.run_id
+    assert window.controller.run_record.specimen_id == "PCB-RESTARTED"
     assert window.cycles.text() == "0"
     assert not window.trial_button.isEnabled()
     assert "overdue" not in window.fault.text()
@@ -1431,28 +1433,28 @@ def test_synchronization_loss_keeps_preview_live_and_requires_explicit_restart(w
 
 def test_cancelling_recovery_preserves_latched_synchronization_failure(window, camera_stub, monkeypatch):
     session = lose_synchronization(window, monkeypatch)
-    run = window.run_record
+    run = window.controller.run_record
     monkeypatch.setattr(desktop.ReplaySettings, "exec", lambda dialog: QDialog.DialogCode.Rejected)
     window.trial_button.click()
     window.poll()
-    assert window.camera.trial is session
-    assert window.run_record == run
+    assert window.controller.camera.trial is session
+    assert window.controller.run_record == run
     assert "overdue" in window.sync.text()
     assert "Live" in window.freshness.text()
 
 
 def test_stop_is_available_for_a_degraded_development_run(window, camera_stub, monkeypatch):
     lose_synchronization(window, monkeypatch)
-    assert window.lifecycle.snapshot.state == RunState.DEGRADED
+    assert window.controller.lifecycle.snapshot.state == RunState.DEGRADED
     assert window.stop_work_button.isEnabled()
-    record = window.run_record
+    record = window.controller.run_record
     window.stop_work_button.click()
     window.poll()
-    assert window.camera.alive
-    assert window.camera.trial is None
-    assert window.lifecycle.snapshot.state == RunState.STOPPED
-    assert window.lifecycle.snapshot.record == record
-    assert window.lifecycle.snapshot.gaps == 1
+    assert window.controller.camera.alive
+    assert window.controller.camera.trial is None
+    assert window.controller.lifecycle.snapshot.state == RunState.STOPPED
+    assert window.controller.lifecycle.snapshot.record == record
+    assert window.controller.lifecycle.snapshot.gaps == 1
 
 
 def test_diagnostics_menu_drives_replay_without_foreground_demo_controls(window, monkeypatch):
@@ -1469,7 +1471,7 @@ def test_diagnostics_menu_drives_replay_without_foreground_demo_controls(window,
     window._update_diagnostics()
     assert start_action.isEnabled()
     start_action.trigger()
-    window.pipeline.join(10)
+    window.controller.pipeline.join(10)
     window.poll()
     assert window.cycles.text() == "4"
     assert window.fixture_button.isHidden()
@@ -1583,7 +1585,7 @@ def test_recipe_save_and_load_in_fresh_setup(region_dialog, window, monkeypatch,
     assert saved.profile.name == "PCB standard bending"
     assert "Recipe saved:" in dialog.recipe_file.text()
     assert dialog.result() != QDialog.DialogCode.Accepted
-    assert window.camera is None and window.run_record is None
+    assert window.controller.camera is None and window.controller.run_record is None
     fresh = desktop.ReplaySettings(window.recipe, window, camera_image=dialog.preview._image, specimen_id="OTHER")
     monkeypatch.setattr(desktop.QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
     fresh.load_recipe_button.click()
@@ -1598,7 +1600,7 @@ def test_recipe_save_and_load_in_fresh_setup(region_dialog, window, monkeypatch,
     fresh.save_button.click()
     assert fresh.result() == QDialog.DialogCode.Accepted
     assert fresh.recipe == expected
-    assert window.run_record is None
+    assert window.controller.run_record is None
     fresh.close()
 
 
@@ -1663,7 +1665,7 @@ def test_loaded_recipe_starts_only_after_start_and_confirmation(window, camera_s
         assert "Recipe loaded:" in dialog.recipe_file.text()
         assert not dialog._confirmed.isChecked()
         assert not dialog.save_button.isEnabled()
-        assert window.camera.trial is None
+        assert window.controller.camera.trial is None
         if not accepted:
             return QDialog.DialogCode.Rejected
         dialog._confirmed.setChecked(True)
@@ -1674,18 +1676,18 @@ def test_loaded_recipe_starts_only_after_start_and_confirmation(window, camera_s
     window.connect_camera()
     window.poll()
     window.load_recipe_button.click()
-    assert window.camera.trial is None
-    assert window.run_record is None
+    assert window.controller.camera.trial is None
+    assert window.controller.run_record is None
     assert window.specimen.text() == "PCB-TEST-001"
     window.trial_button.click()
     if accepted:
-        assert window.camera.trial.recipe == recipe
-        assert window.run_record.specimen_id == "PCB-TEST-001"
+        assert window.controller.camera.trial.recipe == recipe
+        assert window.controller.run_record.specimen_id == "PCB-TEST-001"
         assert window.specimen.text() == "PCB-TEST-001"
         assert not window.specimen.isEnabled()
     else:
-        assert window.camera.trial is None
-        assert window.run_record is None
+        assert window.controller.camera.trial is None
+        assert window.controller.run_record is None
         assert window.specimen.text() == "PCB-TEST-001"
 
 
@@ -1710,11 +1712,11 @@ def test_load_recipe_opens_without_specimen_and_does_not_start(window, camera_st
     assert "Counting only - no detector" in window.run_label.text()
     assert "Start marker:" in window.run_label.toolTip()
     assert "Position marker:" in window.run_label.toolTip()
-    assert window._camera_recipe == recipe
+    assert window.controller.camera_recipe == recipe
     assert window.specimen.text() == ""
-    assert window.camera.trial is None if connected else window.camera is None
-    assert window.run_record is None
-    assert window.lifecycle.snapshot.state == RunState.STOPPED
+    assert window.controller.camera.trial is None if connected else window.controller.camera is None
+    assert window.controller.run_record is None
+    assert window.controller.lifecycle.snapshot.state == RunState.STOPPED
 
 
 def test_cancelling_recipe_picker_preserves_selection(window, monkeypatch, tmp_path):
@@ -1725,9 +1727,9 @@ def test_cancelling_recipe_picker_preserves_selection(window, monkeypatch, tmp_p
     window.load_recipe_button.click()
     monkeypatch.setattr(desktop.QFileDialog, "getOpenFileName", lambda *args: ("", ""))
     window.load_recipe_button.click()
-    assert window._camera_recipe == recipe
+    assert window.controller.camera_recipe == recipe
     assert window.specimen.text() == "PCB-TEST-001"
-    assert window.run_record is None
+    assert window.controller.run_record is None
 
 
 def test_recipe_picker_defaults_to_central_recipe_folder(window, monkeypatch):
@@ -1749,8 +1751,8 @@ def test_main_recipe_load_error_is_visible_without_camera(window, monkeypatch, t
     monkeypatch.setattr(desktop.QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
     window.load_recipe_button.click()
     assert "Recipe not loaded:" in window.fault.text()
-    assert window._camera_recipe is None
-    assert window.run_record is None
+    assert window.controller.camera_recipe is None
+    assert window.controller.run_record is None
 
 
 def test_loaded_recipe_dimensions_checked_when_camera_starts(window, camera_stub, monkeypatch, tmp_path):
@@ -1762,8 +1764,8 @@ def test_loaded_recipe_dimensions_checked_when_camera_starts(window, camera_stub
     window.poll()
     window.trial_button.click()
     assert "Recipe image dimensions differ" in window.fault.text()
-    assert window.camera.trial is None
-    assert window.run_record is None
+    assert window.controller.camera.trial is None
+    assert window.controller.run_record is None
 
 
 def test_bound_recipe_preserves_precise_regions_on_confirmation(region_dialog, tmp_path):
@@ -1807,8 +1809,8 @@ def test_missing_bundled_model_rejects_recipe_without_replacing_selection(window
     monkeypatch.setattr(desktop.QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
     window.load_recipe_button.click()
     assert "Recipe not loaded:" in window.fault.text()
-    assert window._loaded_camera_recipe is None
-    assert window.run_record is None
+    assert window.controller.loaded_recipe is None
+    assert window.controller.run_record is None
 
 
 def test_live_cycle_recipe_counts_inspections_and_preserves_defects(window, camera_stub, monkeypatch, tmp_path):
@@ -1851,7 +1853,7 @@ def test_live_cycle_recipe_counts_inspections_and_preserves_defects(window, came
     monkeypatch.setattr(desktop, "INSPECTION_DIRECTORY", tmp_path / "inspection-results")
     monkeypatch.setattr(desktop.QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
     window.load_recipe_button.click()
-    assert window.run_record is None
+    assert window.controller.run_record is None
     assert "Unqualified inspection" in window.run_label.text()
     assert window.live_view.inspection_region == load_recipe(path).detector.region
     assert window.roi_view._image.isNull()
@@ -1867,12 +1869,12 @@ def test_live_cycle_recipe_counts_inspections_and_preserves_defects(window, came
 
     monkeypatch.setattr(desktop.ReplaySettings, "exec", confirm)
     window.trial_button.click()
-    worker = window._live_inspection
+    worker = window.controller.worker
     assert worker is not None
     assert window.condition.property("verdict_color") == "grey"
     assert "No inspection yet" in window.condition.text()
-    assert window.lifecycle.snapshot.mode == desktop.RunMode.EXPERIMENTAL_INSPECTION
-    trial = window.camera.trial
+    assert window.controller.lifecycle.snapshot.mode == desktop.RunMode.EXPERIMENTAL_INSPECTION
+    trial = window.controller.camera.trial
     try:
         expected_colors = iter(["red", "green", "yellow", "yellow", "grey", "green"])
         for frame in range(13):
@@ -1898,13 +1900,13 @@ def test_live_cycle_recipe_counts_inspections_and_preserves_defects(window, came
                     assert window.roi_view._image.height() == bottom - top
                     pixel = window.roi_view._image.pixelColor(0, 0)
                     assert pixel.red() > pixel.blue()  # Heatmap marks exact cycle pixels, not the live preview.
-                assert window._live_defects == 1
+                assert window.controller.defects == 1
                 assert "latched" in window.defect_alarm.text()
         window.poll()
         window.stop_work_button.click()
         assert worker.finished.wait(5)
         window.poll()
-        snapshot = window.lifecycle.snapshot
+        snapshot = window.controller.lifecycle.snapshot
         assert snapshot.state == RunState.STOPPED
         assert snapshot.observed == 6 and snapshot.inspected == 5
         assert snapshot.defects == 1 and snapshot.uninspected == 1
@@ -1914,14 +1916,14 @@ def test_live_cycle_recipe_counts_inspections_and_preserves_defects(window, came
         assert "DEFECT ALARM" in window.defect_alarm.text()
         assert window.assessment_note.text().startswith("Stopped")
         assert window.evidence.text() == "Saved"
-        assert window.camera.alive
-        assert window.camera.trial is None
+        assert window.controller.camera.alive
+        assert window.controller.camera.trial is None
         assert not window.roi_view._image.isNull()  # Stop retains the last inspection.
         assert len(list(worker.folder.rglob("result.json"))) == 6
         assert worker.folder.parent == desktop.INSPECTION_DIRECTORY
         assert len(list((worker.folder / "yellow-review").glob("cycle-*"))) == 2
         assert len(list((worker.folder / "grey-uninspected").glob("cycle-*"))) == 1
-        assert window._loaded_camera_recipe[0].detector is not None
+        assert window.controller.loaded_recipe[0].detector is not None
         position_rows = [
             window.history.item(row, 5).text()
             for row in range(window.history.rowCount())
@@ -1931,10 +1933,10 @@ def test_live_cycle_recipe_counts_inspections_and_preserves_defects(window, came
         assert all("Awaiting cycle inference" in state for state in position_rows)
         assert not any("detector unavailable" in state for state in position_rows)
         window.trial_button.click()
-        restarted = window._live_inspection
+        restarted = window.controller.worker
         assert restarted is not worker
         assert window.condition.property("verdict_color") == "grey"
-        assert window._live_defects == 0
+        assert window.controller.defects == 0
         assert window.roi_view._image.isNull()
         assert "No latched defect" in window.defect_alarm.text()
         window.stop_work_button.click()
@@ -2007,11 +2009,13 @@ def test_latest_verdict_does_not_flicker_or_regress_and_alarm_survives_evidence_
         path, StoredRecipe("coil", window.recipe, 32, 24), model, desktop.Region(0.1, 0.1, 0.5, 0.5), 0.5
     )
     binding = load_recipe(path).detector
-    record = desktop.RunRecord("test-run", "coil", "test-recipe", "camera", desktop.datetime.now(desktop.UTC))
-    window.run_record = record
-    window.lifecycle.start(record, mode=desktop.RunMode.EXPERIMENTAL_INSPECTION, readiness=desktop.Readiness())
+    record = RunRecord("test-run", "coil", "test-recipe", "camera", desktop.datetime.now(desktop.UTC))
+    window.controller.run_record = record
+    window.controller.lifecycle.start(
+        record, mode=desktop.RunMode.EXPERIMENTAL_INSPECTION, readiness=desktop.Readiness()
+    )
     worker = SimpleNamespace(binding=binding, results=Queue(maxsize=10), failure="")
-    window._live_inspection = worker
+    window.controller.worker = worker
     image = np.zeros((24, 32, 3), dtype=np.uint8)
     evidence = tmp_path / "result.json"
     evidence.write_text("{}")
@@ -2035,7 +2039,7 @@ def test_latest_verdict_does_not_flicker_or_regress_and_alarm_survives_evidence_
         assert window.condition.property("verdict_color") == "green"
         assert "Cycle 3" in window.condition.text()
         assert "Cycle 3 ROI" in window.roi_caption.text()
-        assert window._live_defects == 1  # Yellow above the central threshold does not latch.
+        assert window.controller.defects == 1  # Yellow above the central threshold does not latch.
         before = window.condition.text()
         window._event(events[3])
         window._poll_live_inspection()
@@ -2046,8 +2050,8 @@ def test_latest_verdict_does_not_flicker_or_regress_and_alarm_survives_evidence_
         window._poll_live_inspection()
         assert window.condition.property("verdict_color") == "grey"
         assert "Cycle 4" in window.condition.text()
-        assert window._live_defects == 2
-        assert window.lifecycle.snapshot.defects == 2
+        assert window.controller.defects == 2
+        assert window.controller.lifecycle.snapshot.defects == 2
         assert window.coverage_warning.text() == "1 cycle(s) not inspected"
         assert not window.coverage_warning.isHidden()
         assert window.operator_status.text() == "Needs attention"
@@ -2055,7 +2059,7 @@ def test_latest_verdict_does_not_flicker_or_regress_and_alarm_survives_evidence_
         assert window.evidence.text() == "Failure record saved"
         assert "disk failure" in window.fault.text()
     finally:
-        window._live_inspection = None
+        window.controller.worker = None
 
 
 def test_existing_trained_model_can_be_selected_after_loading_collection(candidate_dialog, monkeypatch):
@@ -2077,13 +2081,13 @@ def test_stop_work_keeps_camera_preview_connected(window, camera_stub, monkeypat
     window.poll()
     approve_trial(monkeypatch)
     window.trial_button.click()
-    recipe = window.camera.trial.recipe
+    recipe = window.controller.camera.trial.recipe
     assert window.stop_work_button.isEnabled()
 
     window.stop_work_button.click()
-    assert window.camera.trial is None
-    assert window.camera.alive
-    assert window.camera.status.state == "Streaming"
+    assert window.controller.camera.trial is None
+    assert window.controller.camera.alive
+    assert window.controller.camera.status.state == "Streaming"
     assert window.stop_work_button.isEnabled() is False
     assert "Stopped" in window.sync.text()
     assert "Stopped" in window.run_label.text()
@@ -2101,7 +2105,7 @@ def test_stop_work_keeps_camera_preview_connected(window, camera_stub, monkeypat
     )
     window.trial_button.click()
     assert reopened_recipes == [recipe]
-    assert window.camera.trial is None
+    assert window.controller.camera.trial is None
 
 
 def test_draw_regions_auto_advance_and_save(region_dialog):
@@ -2287,7 +2291,7 @@ def test_tiny_accidental_drag_preserves_regions_and_selection(region_dialog):
 @pytest.mark.parametrize("size", [(1024, 768), (1440, 900)])
 def test_graphical_editor_native_render(region_dialog, application, tmp_path, size):
     dialog = region_dialog
-    dialog.preview._display_image(desktop.SyntheticSource().read().image)
+    dialog.preview._display_image(SyntheticSource().read().image)
     dialog.resize(min(1000, size[0] - 40), min(680, size[1] - 60))
     application.processEvents()
     drag_region(dialog.preview, (0.05, 0.1), (0.15, 0.2))
@@ -2362,8 +2366,8 @@ def test_trial_cancel_leaves_plain_preview(window, camera_stub, monkeypatch):
     monkeypatch.setattr(desktop.ReplaySettings, "exec", lambda dialog: QDialog.DialogCode.Rejected)
     window.trial_button.click()
     window.poll()
-    assert window.camera.trial is None
-    assert window.run_record is None
+    assert window.controller.camera.trial is None
+    assert window.controller.run_record is None
     assert window.live_view._recipe is None
     assert window.trial_button.isEnabled()
 
@@ -2375,17 +2379,17 @@ def test_trial_counts_observations_without_claiming_defect_inspection(window, ca
     approve_trial(monkeypatch)
     window.trial_button.click()
     assert "locked" in window.run_label.text()
-    trial = window.camera.trial
+    trial = window.controller.camera.trial
     for index in range(3):
         pixels = np.full((24, 32, 3), 0 if index == 1 else 255, dtype=np.uint8)
         frame = CameraFrame(index + 1, 10 + index / 30, pixels)
         trial.observe(frame)
-    window.camera.frames.put_nowait(frame)
+    window.controller.camera.frames.put_nowait(frame)
     window.poll()
     assert window.cycles.text() == "1"
     assert any(window.history.item(row, 4).text() == "Cycle complete" for row in range(window.history.rowCount()))
-    assert len(window.inspections) == 1
-    assert "Unknown" in window.inspections[0].reason
+    assert len(window.controller.inspections) == 1
+    assert "Unknown" in window.controller.inspections[0].reason
     assert "Unknown" in window.condition.text()
     assert "Not recorded" in window.evidence.text()
     assert window.live_view._recipe == trial.recipe
@@ -2398,8 +2402,8 @@ def test_trial_counts_observations_without_claiming_defect_inspection(window, ca
     assert not window.trial_button.isEnabled()
     window.connect_camera()
     window.poll()
-    assert window.camera.trial is None
-    assert window.run_record is None
+    assert window.controller.camera.trial is None
+    assert window.controller.run_record is None
     assert window.cycles.text() == "0"
 
 
@@ -2410,7 +2414,7 @@ def test_marker_trial_native_render(window, application, camera_stub, monkeypatc
     approve_trial(monkeypatch)
     window.trial_button.click()
     pixels = np.zeros((24, 32, 3), dtype=np.uint8)
-    window.camera.frames.put_nowait(CameraFrame(1, monotonic(), pixels))
+    window.controller.camera.frames.put_nowait(CameraFrame(1, monotonic(), pixels))
     window.poll()
     window.resize(*size)
     window.show()

@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-30",
+  "target": "application/rdt_monitor/src/rdt_monitor/qml/Main.qml",
+  "scope": "Frequent front-panel actions with secondary menu access; refinement of the existing Windows Qt interface",
+  "method": "Design review only: native Windows Qt Quick. Impeccable native review/audit principles adapted to desktop; web DOM detector and mobile platform rules do not apply.",
+  "design_authority": "TechRequirement/design direction.md; existing semantic palette and working inspection pipeline",
+  "critique": {
+    "design_specificity": "The camera-dominant workspace, exact-cycle ROI, separate run/verdict/alarm states and restrained semantic colors are specific to the inspection instrument. The menu-only treatment of frequent review actions weakened this task-oriented hierarchy.",
+    "heuristics_before_polish": [
+      {"name": "Visibility of system status", "score": 3, "finding": "Independent camera, monitoring, result and alarm states are visible."},
+      {"name": "Match system and real world", "score": 3, "finding": "Specimen, recipe, cycle and evidence terminology match the existing workflow."},
+      {"name": "User control and freedom", "score": 2, "finding": "At minimum height the shared result/control scroller can clip Start/Stop."},
+      {"name": "Consistency and standards", "score": 3, "finding": "Qt menus are familiar; direct recipe loading duplicates a menu handler."},
+      {"name": "Error prevention", "score": 4, "finding": "Explicit setup confirmation and action eligibility remain enforced by the existing controller."},
+      {"name": "Recognition rather than recall", "score": 2, "finding": "Offline inspection and results require remembering menu locations."},
+      {"name": "Flexibility and efficiency", "score": 2, "finding": "Frequent review actions require opening a menu each time."},
+      {"name": "Aesthetic and minimalist design", "score": 3, "finding": "Camera remains dominant; restrained themes and labeled groups aid scanning."},
+      {"name": "Error recovery", "score": 3, "finding": "Fault and coverage messages remain distinct from inspection verdicts."},
+      {"name": "Help and documentation", "score": 2, "finding": "About and empty-state guidance exist; complete in-app operator help is limited."}
+    ],
+    "score": 27,
+    "maximum": 40,
+    "strengths": [
+      "Camera preview remains the principal work area.",
+      "Semantic state colors are paired with text and separate operational meanings.",
+      "Desktop menus retain secondary actions without adding permanent tool panels."
+    ],
+    "priority_issues": [
+      {"severity": "P1", "issue": "Start/Stop can scroll out of view at minimum height", "impact": "The primary monitoring controls require scrolling when the result card consumes the available height.", "resolution": "Pinned monitoring controls outside the result scroller; capped and scrollable verdict area."},
+      {"severity": "P2", "issue": "Frequent review commands are menu-only", "impact": "Operators need extra navigation and recall to open images or saved evidence.", "resolution": "Restored Offline inspection and Open results on the front panel; retained their menu entries."},
+      {"severity": "P2", "issue": "Recipe button and menu use separate handlers", "impact": "Duplicated action wiring can diverge as eligibility or behavior changes.", "resolution": "Recipe, offline and results shortcuts reuse their corresponding QML Actions."}
+    ],
+    "cognitive_load": "Two direct review commands are exposed. Camera and specimen/recipe actions remain in separate task groups; training, diagnostics and preferences remain disclosed through menus.",
+    "personas": [
+      {"name": "Alex, frequent operator", "red_flag": "Repeated menu navigation to inspect an image or open saved results."},
+      {"name": "Jordan, first-time operator", "red_flag": "Available review tools are not visible until a menu is explored."},
+      {"name": "Sam, keyboard/accessibility user", "red_flag": "Scrolling can separate the monitoring controls from their operational context."}
+    ],
+    "emotional_journey": "Keep preparation, Start/Stop and evidence retrieval predictable; do not imply inspection success through camera health or decorative color.",
+    "questions": "Questions skipped: the user explicitly selected the critique-polish-audit pipeline and asked to restore frequent front-panel actions."
+  },
+  "polish": {
+    "front_panel": ["Camera index/connect/disconnect", "Specimen ID", "Load recipe", "Offline inspection", "Open results", "Start/Restart", "Stop"],
+    "secondary_menus": ["Collection/training", "Replay diagnostics", "Appearance", "Run details", "About"],
+    "other_changes": ["Visible focus and descriptive names for direct review buttons", "Accessible descriptions for preview and exact-cycle ROI", "No new colors, dependencies, animation or backend behavior"],
+    "priority_issue_status": "All three critique priority issues addressed."
+  },
+  "audit": {
+    "platform_conformance": "Pass for inspected paths: conventional Qt menus, direct operational controls, shared actions and content-area dialog sizing.",
+    "dimensions": [
+      {"name": "Accessibility", "score": 3, "evidence": "Real Tab traversal, visible focus, named controls/images and semantic contrast checks. Narrator and user text-scale acceptance remain unverified."},
+      {"name": "Performance", "score": 3, "evidence": "No new frame transport, workers, timers, effects or dependencies. Existing source/runtime bounds retained; no new endurance or latency benchmark performed."},
+      {"name": "Appearance and theming", "score": 4, "evidence": "Existing semantic tokens and shared controls; both themes rendered at three sizes; all 44 semantic text contrast cases included in validation."},
+      {"name": "Desktop platform conformance", "score": 4, "evidence": "Menus work by mouse and keyboard; direct offline and results actions dispatch correctly; Start/Stop remain beside preview without scrolling."},
+      {"name": "Window adaptivity", "score": 3, "evidence": "960x640, 1280x800 and 1440x974 renders; active-job badge at minimum width; pinned controls and no clipped quick-action labels. OS DPI/font scaling remains station acceptance."}
+    ],
+    "score": 17,
+    "maximum": 20,
+    "rating": "Good; bounded desktop verification, not accessibility or station certification",
+    "remaining_findings": [
+      {"severity": "P2", "location": "application/rdt_monitor/src/rdt_monitor/qml/Main.qml and qml/theme/Theme.qml", "category": "Accessibility/adaptivity", "issue": "Fixed logical-pixel font and control sizing has no explicit user text-scale setting.", "impact": "Large-text users may need additional accommodation despite Qt DPI scaling.", "recommendation": "Exercise intended Windows DPI and text settings plus Narrator on the station; use impeccable adapt/harden if clipping or reading-order failures are observed."}
+    ],
+    "no_new_p0_or_p1_found": true,
+    "verification": {
+      "native_checks": "Six main-window captures; both-theme menu mouse/keyboard dispatch; direct offline button; results dispatch intercepted to avoid Explorer; real Tab traversal; active-job narrow header; pinned controls and quick-button containment/text fit.",
+      "integration_and_palette_results": "Recorded in application/rdt_monitor/dist/migration-qml-complete/gui-balanced/junit.xml",
+      "passed": 161,
+      "failed": 0,
+      "hardware": "No camera opened, actual-model fit performed or physical acceptance claimed."
+    }
+  },
+  "run_notes": {
+    "context_loader": "Unavailable in sandbox: engine 0.1.18 could not create its personal cache. Existing source, design direction, palette and native renders used directly as required by the skill fallback.",
+    "product_and_design_root_files": "PRODUCT.md and DESIGN.md absent; incumbent design direction used without inventing them.",
+    "ignore_list": "No .impeccable/critique/ignore.md present.",
+    "assessments": "Native single-context visual/source review; no web detector or dual-agent web assessment.",
+    "slug_snapshot_trend": "Engine-backed slug/snapshot/trend unavailable; this JSON is the explicit manual review record, not an engine-registered snapshot.",
+    "browser_overlay_server": "Not applicable: native Qt, no browser, overlay or live server started.",
+    "artifacts": "Generated checks/screenshots retained under the ignored gui-balanced artifact directory; source regression assertion retained in test_qml.py."
+  }
+}

@@ -79,10 +79,14 @@ QLabel#statusBadge[status="active"] { color: #21683B; background-color: #EAF6EE;
 QLabel#statusBadge[status="attention"] { color: #795411; background-color: #FFF5DF; border-color: #E5C77E; }
 QLabel#statusBadge[status="offline"] { color: #596674; }
 QPushButton#primary { background: #237646; border-color: #237646; color: #FFFFFF; }
-QPushButton#primary:hover { background: #2C8953; border-color: #2C8953; }
+QPushButton#primary:hover { background: #2A8350; border-color: #2A8350; }
 QPushButton#primary:pressed { background: #1B5F39; }
+QFrame#controlPanel QPushButton#primary { background: #237646; border-color: #237646; color: #FFFFFF; }
+QFrame#controlPanel QPushButton#primary:hover { background: #2A8350; border-color: #2A8350; }
+QFrame#controlPanel QPushButton#primary:pressed { background: #1B5F39; }
 QPushButton#stopAction { color: #8E293B; border-color: #D7A2AA; background: #FFF5F6; }
 QPushButton#stopAction:hover { background: #FCE6E9; border-color: #B94F60; }
+QPushButton#stopAction:disabled { background: #EAEDF1; color: #626B76; border-color: #C5CED8; }
 QPushButton:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
 QPlainTextEdit:focus, QTableWidget:focus { border: 2px solid #2673C5; }
 QTableWidget { border-radius: 7px; }

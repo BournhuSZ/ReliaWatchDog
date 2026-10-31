@@ -1,6 +1,6 @@
 # RDT Reliability Monitor
 
-Standalone PyQt6 application implementing the camera and synchronization workflow of the agreed
+Standalone PySide6 application implementing the camera and synchronization workflow of the agreed
 [architecture](../../TechRequirement/Architecture.md) and
 [design direction](../../TechRequirement/design%20direction.md). Anomalib core and
 Studio are unchanged. Offline and cycle-bound live exported-model inspection are
@@ -94,7 +94,176 @@ uv sync --project application/rdt_monitor --group dev
 uv run --project application/rdt_monitor rdt-monitor
 ```
 
+The default command retains the complete operator workflow. To try the optional
+QML interface after syncing the same project:
+
+```powershell
+uv run --project application/rdt_monitor --extra inference rdt-monitor-qml
+```
+
+The QML window has a conventional **File / Edit / View / Tools / Help** menu bar.
+File contains recipe loading (Ctrl+O), results and Exit; Edit contains specimen
+focus and camera connection actions. View contains light appearance and run details.
+Tools groups offline inspection, collection/training and diagnostics/replay; Help
+contains About. Camera connection and specimen/recipe setup stay on the front
+panel, with Start/Stop beside the latest inspection. Use **Tools → Offline
+inspection**, **File → Open results folder**, and **View → Settings** for the
+other tools. Shared actions keep menu and command behavior aligned.
+Both color themes and the compact
+960 x 640 layout are supported.
+
+The operating layout follows the supplied gui1.0 reference: branding, Specimen &
+recipe, Camera source and Station session share a top row at 1280 logical pixels
+and above. At narrower widths, branding wraps above the three setup cards. The
+compact actual-specimen serial remains editable in Specimen & recipe. Read-only
+recipe information shows saved part name/batch and the detector's OpenVINO type,
+hash prefix, threshold and review margin; hover exposes complete metadata. Missing
+metadata is explicit, and replay does not present a retained live detector as active.
+The lock switch sits in the Station session header and remains usable while locked.
+Warnings/latched alarms appear above Latest inspection in a scrollable right-hand
+status area; Start/Stop stay pinned. The bottom row is Event log, Run summary, ROI.
+
+The **Run summary · Unqualified**
+card shows evidence-backed Pass (no defect detected), Fail (defect detected), and
+Review counts for the current run, with a stacked distribution chart. Yield is
+`Pass / (Pass + Fail + Review)`, shown as a percentage; no completed inspections
+shows a dash. Pending, uninspected and counting-only cycles never increase yield.
+Missing evidence also excludes a result from Pass/Fail/Review, while the separate
+latched defect alarm keeps its existing behavior. Counts survive Stop and recovery
+within the same run and reset on a new Start. In short windows with an alarm, a
+compact summary keeps counts/chart contained; coverage totals remain visible in
+Monitoring control, and the yield tooltip explains the denominator. The chart adds
+no plotting dependency and never recalculates an inspection verdict.
+
+Choose **View → Lock window size** to fix the current window width and height.
+The menu item is checked while fixed. Uncheck it to restore resizing and the
+previous size limits. This setting applies to the current application session;
+the GUI lock also prevents changing it until the interface is unlocked.
+
+The camera uses one **Connect camera / Disconnect camera** button whose command
+follows the actual acquisition state. The **Lock GUI** switch in Station session disables all
+GUI operations, including Start/Stop, camera/recipe changes, menus, shortcuts,
+image controls and window closing. The switch remains usable: on means locked,
+off means unlocked. Acquisition, inspection, preview refresh and event logging
+continue while locked. Switch it off before stopping or closing. This is a
+session-local accidental-input guard, not user authentication; a new session opens unlocked.
+
+The Station session panel shows a semantic monitoring-status light, a live
+workstation-local timestamp with its time zone, and the OS user running the
+application. The Windows user is displayed without a separate app login. Missing
+OS identity is shown as Unavailable. Time and status continue refreshing while
+the interface is locked. **View → Settings** provides
+light/dark appearance, Original/anomaly-map preference and Lock GUI; changes apply
+immediately, and Close dismisses the panel. The status light describes monitoring
+health, independently of inspection verdicts and latched defects.
+
+The QML interface provides camera connection, recipe loading, confirmed Start/Stop,
+source health, counters, a bounded event log and the shared light/dark preference.
+Loading a recipe preserves the current specimen serial and does not start a run.
+Start opens the QML Basic/Advanced setup editor on an owned frozen camera
+image; confirmation saves the run setup before attaching counting or unqualified
+model-bound inspection. Stop drains pending work while keeping healthy preview.
+The latest result shows its exact cycle/frame, evidence status and ROI; the Map
+switch changes between raw ROI and the existing heatmap without running inference.
+The four verdicts remain separate from the latched defect alarm and camera health.
+
+Tools → Offline inspection opens independent image inspection in QML, using the existing
+background image import and exported-model worker. Draw, move or resize the cyan
+inspection ROI, or enter normalized X/Y/W/H percentages. Select a trusted OpenVINO
+XML (with matching BIN) or ONNX export, set an explicit threshold, and click Inspect
+image. Its binary unqualified normal/anomaly decision preserves the existing offline
+tool behavior; it does not use the live recipe review band or change live counters,
+verdicts, the defect latch, selected recipe or evidence. Changing inputs clears the
+result. Heatmap toggling only changes display. Save PNG snapshot writes the displayed
+source/overlay as a manual snapshot, not qualified inspection evidence. Closing
+discards the screen's inputs/results and rejects late completions without waiting
+for the worker on the GUI thread.
+
+Collect/train opens the QML Collection, Review and Training stages. The Widgets
+command retains all original workflows as a fallback pending workstation acceptance.
+Close one camera session before opening another interface.
+
+For collection, connect the camera, enter the actual specimen serial and choose Auto
+or Manual with a target of 20-30 candidates. Auto requires an explicitly configured
+counting-only synchronization run; it attaches the existing exact-cycle callback.
+Manual requires one Capture cycle command per completed cycle, a fresh distinct
+frame and completion of the previous image write. Select Use camera frame / new draft,
+draw the independent training ROI (or enter percentages), choose output storage and
+click Collect candidates. Reaching the target stops candidate capture; it never
+labels images normal or starts training. Camera/synchronization loss produces an
+incomplete collection. Source/specimen changes are locked while capture drains.
+
+Review each candidate with Previous/Next and source/ROI-crop views. Displayed images
+are checked against their saved hashes. Loading a collection again requires a fresh
+review; failed loads clear the previous source/ROI draft. Only a complete, reviewed
+set enables Specimen remained undamaged. Select the trusted separate training Python,
+tick that explicit declaration and click Train PatchCore. The unchanged training CLI
+rechecks metadata, image hashes and exact source/crop alignment, creates a new training
+job and returns an unqualified OpenVINO export. Its bounded log and Cancel training
+remain available; close the panel to keep working, or cancel/wait before exiting the app.
+
+Inspect export offline opens the independent offline tool. Load trained model recovers
+an existing export confined to the collection directory. Enter a family recipe name,
+purpose, threshold and inclusive review margin, then Save inspection recipe with a
+matching-dimension synchronization recipe and a new destination. This preserves old
+files and bundles. Saving never changes the active detector: Stop, Load recipe and
+confirm Start explicitly to use the new family. Closing the panel does not stop a
+capture/training job; the main screen shows an active-job badge.
+
+The QML setup editor draws/moves/resizes blue Start and amber Position markers on
+the frozen image. Click an inactive marker to select it, or use the role buttons;
+selected handles take priority where regions overlap. Clear affects only the selected
+marker. The cyan trained inspection ROI is read-only. Basic edits the actual serial,
+optional name/batch and recipe selection. Advanced provides numeric marker percentages,
+appearance/legacy-brightness recognition, timing, recipe purpose metadata and bound
+detector threshold/review margin. Appearance references are reused when loaded geometry
+is unchanged; Use frozen marker appearance explicitly recaptures them from this snapshot.
+
+Every actual edit clears confirmation. Unchanged numeric fields retain their original
+precision. Technical synchronization, decision and recipe-purpose changes require
+Save new recipe revision before Use for this run. Saving preserves the previous file
+and existing detector bundle; model-bound revisions stay beside their original recipe.
+Marker remount adjustments can be used for the run without relocating the trained
+inspection crop. After checking markers, crop and test cycles, tick confirmation and
+click Use for this run. The controller revalidates the source recipe and persists the
+run setup before attaching camera processing. Cancel discards the draft and starts no
+run; a recipe revision explicitly saved earlier remains on disk.
+
+Diagnostics in QML supports local recording selection and the synthetic fixture.
+Choose recording selects an existing local file without opening the decoder or
+starting a run. Enter a specimen/replay label, optionally edit recording settings,
+then click Start recording. Start/Position rectangles use normalized X/Y/Width/Height
+percentages; stable frames, maximum gap, cycle timeout and brightness retain the
+existing replay validation and recognition behavior. Apply commits the whole edit;
+Cancel or closing the panel discards the draft. These settings never replace the live
+recipe, model, threshold or actual specimen serial. The synthetic fixture always uses
+its own known settings.
+
+Replay is **counting only**, uses unqualified source-frame time, and does not perform
+defect inference or save inspection evidence. The source title marks recording
+previews NOT LIVE; the badge distinguishes replaying, ended, stopped and faulted
+sources. EOF does not prove recording completeness. Closing Diagnostics leaves an
+active replay running; Stop replay requests asynchronous stop. Live camera ownership,
+active runs and unfinished finalization block source selection and replay edits.
+
 ## Implementation Status
+
+The [QML migration plan](../../TechRequirement/RDT_PySide6_QML_Migration_Spec.md)
+is being implemented incrementally. The first extraction moves cycle admission,
+inspection-result validation, defect latching, bounded inspection history and
+Stop finalization into the Qt-independent `MonitorController`. The controller also
+owns exclusive camera/replay resources, setup commit, bounded queue consumption,
+command eligibility and asynchronous disconnect/close. The PySide6 Widgets app
+and all collection/training, recipe, replay and offline tools remain the operator
+interface during the transition. PySide6 Essentials supplies the required Qt modules.
+The QML interface now covers all GUI workflows through the same controller and
+existing collection/training backends. The default Widgets interface remains the
+fallback until target-workstation acceptance and cutover. Its semantic palette
+preserves the existing GUI colors, with darker light-mode verdict text, readable
+disabled controls and explicit keyboard focus.
+See the [migration progress record](../../TechRequirement/QML_Migration_Progress.md).
+The [release-candidate acceptance record](../../TechRequirement/QML_Migration_Acceptance.md)
+separates completed GUI/software checks from pending physical and deployment gates.
 
 The agreed 24/7 operator workflow is being implemented in increments. Run lifecycle,
 manual/automatic training collection, and model-bound cycle inspection are available;
@@ -642,9 +811,34 @@ No simulated normal/anomaly scores or heatmaps are presented as real results.
 The session table and inspection list retain at most 500 entries, intentionally
 not a complete durable audit. The editable synchronization and diagnostic settings
 are not a protected production setup mode. License
-review, including PyQt6 GPL/commercial obligations, is required before distribution.
+review of PySide6 and the bundled Qt modules is required before distribution.
 
 ## Validate
+
+Migration validation on 2026-10-30: **594 tests passed, 2 Windows symlink privilege
+checks skipped** on native Windows with PySide6/Qt 6.11.3. Coverage includes the
+shared source controller, all existing Widgets workflows, QML image identity and
+ROI/evidence validity, confirmed QML operation, cancellation/fault recovery, event
+models, close behavior, independent QML offline inspection/ROI interaction, 44 semantic
+contrast cases and native rendering in both themes. Offline integration includes
+actual OpenVINO contract execution and late-result rejection, without accuracy claims.
+Recording replay adds actual generated-video encode/decode, counting-only source
+identity, atomic settings, native Apply/Cancel, source ownership and startup-failure
+recovery checks. Generated recordings do not establish physical marker qualification.
+QML frozen setup adds ownership, confirmation, appearance references, recipe revision
+and model-ROI integrity checks plus actual modal accept/cancel and failure paths.
+The 2026-10-31 validation covers 620 cases in isolated Widgets
+(163 passed), QML (132 passed) and backend (323 passed, 2 skipped) processes: 618
+passed and 2 Windows symlink-privilege checks skipped. Summary tests additionally
+cover exact-once, evidence-backed outcome accounting, review/unknown exclusions,
+cumulative totals, new-run reset and both-theme geometry. Candidate
+tests cover actual manual/marker-triggered writes, hash-verified review, explicit
+normal confirmation, real child-process contract export, failure/cancellation and
+nonblocking progress under a held writer lock. Contract graphs and generated data
+do not establish trained-model accuracy or station performance.
+Ruff, formatting and source-to-wheel builds passed. The installed wheel loaded its
+QML/theme resources and rendered outside the checkout without the inference extra.
+This validates software migration behavior, not physical-camera or model qualification.
 
 Collection/review/training workflow validation on 2026-10-15: 226 standalone
 tests passed; one Windows symlink-creation test was skipped for missing privileges.

@@ -1,0 +1,27 @@
+{
+  "recorded_date": "2026-10-30",
+  "source_revision": "3c2e393e",
+  "scope": "Development workstation software baseline; no hardware or performance qualification",
+  "python": "3.11.9",
+  "platform": "Windows-10-10.0.26100-SP0",
+  "qt_runtime": "6.11.2",
+  "qt_build_version": "6.11.0",
+  "uv_cli": "0.12.19",
+  "binding_version": "6.11.0",
+  "packages": {
+    "rdt-monitor": "0.1.0",
+    "PyQt6": "6.11.0",
+    "PyQt6-Qt6": "6.11.2",
+    "numpy": "2.4.6",
+    "opencv-python-headless": "4.14.0.94",
+    "openvino": "2026.4.1",
+    "pytest": "9.1.1",
+    "ruff": "0.17.0"
+  },
+  "lock_sha256": "9136a42b7ccc7d75067e2b2ff3b54af11046edeef37a575d8fbf7495e5a98054",
+  "initial_tests": {
+    "passed": 392,
+    "failed": 10,
+    "skipped": 2
+  }
+}
